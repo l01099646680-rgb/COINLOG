@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>복기 노트 — 코인 트레이딩</title>
+<meta name="theme-color" content="#13151b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="복기노트">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2313151b'/%3E%3Crect x='11' y='30' width='7' height='17' rx='1.5' fill='%23e5594f'/%3E%3Cline x1='14.5' y1='25' x2='14.5' y2='51' stroke='%23e5594f' stroke-width='2.5'/%3E%3Crect x='24' y='22' width='7' height='20' rx='1.5' fill='%2343b581'/%3E%3Cline x1='27.5' y1='16' x2='27.5' y2='47' stroke='%2343b581' stroke-width='2.5'/%3E%3Crect x='37' y='33' width='7' height='13' rx='1.5' fill='%2343b581'/%3E%3Cline x1='40.5' y1='28' x2='40.5' y2='50' stroke='%2343b581' stroke-width='2.5'/%3E%3Cline x1='8' y1='27' x2='56' y2='27' stroke='%23d8a443' stroke-width='2' stroke-dasharray='4 3' opacity='.85'/%3E%3Ccircle cx='27.5' cy='27' r='6' fill='none' stroke='%23d8a443' stroke-width='3'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2313151b'/%3E%3Crect x='11' y='30' width='7' height='17' rx='1.5' fill='%23e5594f'/%3E%3Cline x1='14.5' y1='25' x2='14.5' y2='51' stroke='%23e5594f' stroke-width='2.5'/%3E%3Crect x='24' y='22' width='7' height='20' rx='1.5' fill='%2343b581'/%3E%3Cline x1='27.5' y1='16' x2='27.5' y2='47' stroke='%2343b581' stroke-width='2.5'/%3E%3Crect x='37' y='33' width='7' height='13' rx='1.5' fill='%2343b581'/%3E%3Cline x1='40.5' y1='28' x2='40.5' y2='50' stroke='%2343b581' stroke-width='2.5'/%3E%3Cline x1='8' y1='27' x2='56' y2='27' stroke='%23d8a443' stroke-width='2' stroke-dasharray='4 3' opacity='.85'/%3E%3Ccircle cx='27.5' cy='27' r='6' fill='none' stroke='%23d8a443' stroke-width='3'/%3E%3C/svg%3E">
 <style>
   :root{
     --bg:#13151b;
@@ -39,7 +45,8 @@
     padding:22px 24px 0;
   }
   .head-inner{max-width:1400px;margin:0 auto}
-  .brand{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+  .brand-mark{border-radius:8px;flex-shrink:0}
   .brand h1{font-size:23px;font-weight:800;letter-spacing:-.5px}
   .brand .belt{color:var(--gold)}
   .brand .sub{color:var(--muted);font-size:12.5px;letter-spacing:.3px}
@@ -237,6 +244,17 @@
 <header>
   <div class="head-inner">
     <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 64 64" width="30" height="30" aria-hidden="true">
+        <rect width="64" height="64" rx="14" fill="#1b1e26"/>
+        <rect x="11" y="30" width="7" height="17" rx="1.5" fill="#e5594f"/>
+        <line x1="14.5" y1="25" x2="14.5" y2="51" stroke="#e5594f" stroke-width="2.5"/>
+        <rect x="24" y="22" width="7" height="20" rx="1.5" fill="#43b581"/>
+        <line x1="27.5" y1="16" x2="27.5" y2="47" stroke="#43b581" stroke-width="2.5"/>
+        <rect x="37" y="33" width="7" height="13" rx="1.5" fill="#43b581"/>
+        <line x1="40.5" y1="28" x2="40.5" y2="50" stroke="#43b581" stroke-width="2.5"/>
+        <line x1="8" y1="27" x2="56" y2="27" stroke="#d8a443" stroke-width="2" stroke-dasharray="4 3" opacity=".85"/>
+        <circle cx="27.5" cy="27" r="6" fill="none" stroke="#d8a443" stroke-width="3"/>
+      </svg>
       <h1>복기<span class="belt">노트</span></h1>
       <span class="sub">매매는 끝났고, 테이프를 돌릴 시간 · 코인 트레이딩 리뷰</span>
     </div>
