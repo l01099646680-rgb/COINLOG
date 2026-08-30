@@ -242,7 +242,19 @@
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
   .app-foot{max-width:1400px;margin:34px auto 0;padding:16px 24px 30px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--faint)}
-  .foot-actions{display:flex;gap:8px}
+  .foot-main{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .foot-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .sync-state{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--line2);border-radius:999px;font-size:11.5px;font-weight:700;color:var(--muted);white-space:nowrap}
+  .sync-state::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--faint)}
+  .sync-state.ok{color:var(--jade);border-color:rgba(67,181,129,.35)}
+  .sync-state.ok::before{background:var(--jade)}
+  .sync-state.syncing{color:var(--gold);border-color:rgba(216,164,67,.4)}
+  .sync-state.syncing::before{background:var(--gold);animation:sync-pulse .8s ease-in-out infinite alternate}
+  .sync-state.error{color:var(--red);border-color:rgba(229,89,79,.4)}
+  .sync-state.error::before{background:var(--red)}
+  .sync-state.offline{color:var(--short);border-color:rgba(155,126,222,.4)}
+  .sync-state.offline::before{background:var(--short)}
+  @keyframes sync-pulse{to{opacity:.25}}
   .footer-link{background:none;border:1px solid var(--line2);color:var(--muted);font-size:12px;font-weight:600;padding:7px 13px;border-radius:6px}
   .footer-link:hover{border-color:var(--gold);color:var(--gold)}
 
@@ -465,7 +477,10 @@ SOL s 150.2 149.1"></textarea>
 </main>
 
 <footer class="app-foot">
-  <span>기록은 이 브라우저에 저장됩니다 · <span id="foot-count">0</span>건</span>
+  <div class="foot-main">
+    <span>기록은 이 브라우저에 저장됩니다 · <span id="foot-count">0</span>건</span>
+    <span class="sync-state" id="sync-status">동기화 확인 중</span>
+  </div>
   <div class="foot-actions">
     <button class="footer-link" id="sync-setup">동기화 설정</button>
     <button class="footer-link" id="sync-now">↻ 동기화</button>
@@ -1634,9 +1649,36 @@ function syncCfg(){
   return {url:localStorage.getItem('coinSyncUrl')||'',key};
 }
 function syncReady(){const c=syncCfg();return !!c.url&&c.key.length>=12}
+function syncTimeLabel(iso){
+  const d=new Date(iso||'');if(!Number.isFinite(d.getTime()))return '';
+  const now=new Date(),clock=pad2(d.getHours())+':'+pad2(d.getMinutes());
+  return d.toDateString()===now.toDateString()?clock:(d.getMonth()+1)+'/'+d.getDate()+' '+clock;
+}
+function syncErrorLabel(message){
+  const m=String(message||'');
+  if(m.includes('비밀키'))return '오류 · 비밀키 확인 필요';
+  if(m.includes('연결')||m.includes('서버')||m.includes('HTTP'))return '오류 · 서버 연결 실패';
+  if(m.includes('용량')||m.includes('large'))return '오류 · 저장 용량 초과';
+  return '오류 · 동기화 확인 필요';
+}
+function setSyncStatus(kind,text,title=''){
+  const el=document.getElementById('sync-status');if(!el)return;
+  el.className='sync-state '+kind;el.textContent=text;el.title=title||text;
+}
+function updateSyncStatus(){
+  if(!syncReady()){setSyncStatus('idle','동기화 미설정');return}
+  if(navigator.onLine===false){setSyncStatus('offline','오프라인 · 연결되면 자동 재시도');return}
+  if(syncRunning){setSyncStatus('syncing','동기화 중…');return}
+  const error=localStorage.getItem('coinLastSyncError')||'';
+  if(error){setSyncStatus('error',syncErrorLabel(error),error);return}
+  const last=localStorage.getItem('coinLastSyncAt')||'';
+  if(last){setSyncStatus('ok','정상 · 마지막 '+syncTimeLabel(last),last);return}
+  setSyncStatus('idle','자동 동기화 대기');
+}
 function updateSyncUI(){
   const b=document.getElementById('sync-setup');
   if(b)b.textContent=syncReady()?'자동 동기화 ✓':'동기화 설정';
+  updateSyncStatus();
 }
 try{localStorage.removeItem('coinSyncKey')}catch(e){}
 
@@ -1646,6 +1688,7 @@ document.getElementById('sync-setup').onclick=()=>{
   if(url===null)return;
   if(!url.trim()){
     localStorage.removeItem('coinSyncUrl');localStorage.removeItem('coinSyncKey_v2');sessionStorage.removeItem('coinSyncKey_v2');
+    localStorage.removeItem('coinLastSyncError');
     updateSyncUI();toast('이 기기의 동기화를 껐어요');return;
   }
   const key=prompt('비밀키 (12자 이상, 16자 이상 권장)\n\nPC와 폰에 한 글자도 다르지 않게 입력하세요.\n완전 자동 동기화를 위해 이 기기에 기억됩니다.\n\n이미 입력한 키를 유지하려면 비워 두세요.','');
@@ -1655,6 +1698,7 @@ document.getElementById('sync-setup').onclick=()=>{
   if(!window.crypto||!crypto.subtle){toast('이 브라우저는 암호화를 지원하지 않아요');return}
   localStorage.setItem('coinSyncUrl',url.trim().replace(/\/+$/,''));
   localStorage.setItem('coinSyncKey_v2',nextKey);sessionStorage.removeItem('coinSyncKey_v2');
+  localStorage.removeItem('coinLastSyncError');
   updateSyncUI();scheduleAutoSync('setup',200);toast('자동 동기화 설정 완료');
 };
 
@@ -1816,7 +1860,7 @@ async function runSync(c){
 
 let syncRunning=false,syncQueued=false,autoSyncTimer=null;
 function scheduleAutoSync(reason,delay=900){
-  if(!syncReady()||navigator.onLine===false)return;
+  if(!syncReady()||navigator.onLine===false){updateSyncStatus();return}
   if(autoSyncTimer)clearTimeout(autoSyncTimer);
   autoSyncTimer=setTimeout(()=>{autoSyncTimer=null;performSync(false)},delay);
 }
@@ -1824,20 +1868,27 @@ async function performSync(manual){
   if(manual&&autoSyncTimer){clearTimeout(autoSyncTimer);autoSyncTimer=null}
   if(!syncReady()){
     if(manual)toast('먼저 동기화 설정에서 서버 주소와 비밀키를 입력하세요');
+    updateSyncStatus();
     return;
   }
-  if(navigator.onLine===false){if(manual)toast('인터넷 연결을 확인하세요');return}
+  if(navigator.onLine===false){if(manual)toast('인터넷 연결을 확인하세요');updateSyncStatus();return}
   if(syncRunning){syncQueued=true;return}
   syncRunning=true;
   const b=document.getElementById('sync-now'),c=syncCfg();
   b.disabled=true;b.textContent=manual?'동기화 중…':'자동 동기화 중…';
+  updateSyncStatus();
   if(manual)toast('기록을 안전하게 합치는 중…');
   try{
     const merged=await runSync(c);
+    localStorage.removeItem('coinLastSyncError');
     if(manual)toast('동기화 완료 · '+merged.trades.length+'건');
-  }catch(e){toast((manual?'동기화':'자동 동기화')+' 실패: '+e.message)}
+  }catch(e){
+    localStorage.setItem('coinLastSyncError',e.message||'알 수 없는 동기화 오류');
+    toast((manual?'동기화':'자동 동기화')+' 실패: '+e.message);
+  }
   finally{
     syncRunning=false;b.disabled=false;b.textContent='↻ 동기화';
+    updateSyncStatus();
     if(syncQueued){syncQueued=false;scheduleAutoSync('queued',250)}
   }
 }
@@ -1847,7 +1898,8 @@ function syncWhenReturning(){
   const last=timeMs(localStorage.getItem('coinLastSyncAt'));
   if(!last||Date.now()-last>15000)scheduleAutoSync('return',300);
 }
-window.addEventListener('online',()=>scheduleAutoSync('online',250));
+window.addEventListener('online',()=>{updateSyncStatus();scheduleAutoSync('online',250)});
+window.addEventListener('offline',updateSyncStatus);
 window.addEventListener('focus',syncWhenReturning);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncWhenReturning()});
 
@@ -1873,9 +1925,10 @@ document.getElementById('sync-key-change').onclick=async()=>{
     await workerRequest(c,'POST',{data:encrypted,baseRevision:remoteReply.revision||null,newAuthToken},'/rotate');
     await persistState(merged);
     localStorage.setItem('coinSyncKey_v2',nextKey);sessionStorage.removeItem('coinSyncKey_v2');updateSyncUI();
+    localStorage.setItem('coinLastSyncAt',new Date().toISOString());localStorage.removeItem('coinLastSyncError');
     toast('비밀키 변경 완료 · 다른 기기에도 새 키를 입력하세요');
-  }catch(e){toast('비밀키 변경 실패: '+e.message)}
-  finally{b.disabled=false;b.textContent='비밀키 변경'}
+  }catch(e){localStorage.setItem('coinLastSyncError',e.message||'비밀키 변경 실패');toast('비밀키 변경 실패: '+e.message)}
+  finally{b.disabled=false;b.textContent='비밀키 변경';updateSyncStatus()}
 };
 
 /* ---------- init ---------- */
