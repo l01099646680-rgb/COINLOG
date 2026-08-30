@@ -254,6 +254,9 @@
   .sync-state.error::before{background:var(--red)}
   .sync-state.offline{color:var(--short);border-color:rgba(155,126,222,.4)}
   .sync-state.offline::before{background:var(--short)}
+  .sync-size{display:inline-flex;padding:4px 8px;border:1px solid var(--line2);border-radius:999px;font-size:11.5px;font-family:var(--mono);color:var(--muted);white-space:nowrap}
+  .sync-size.warn{color:var(--gold);border-color:rgba(216,164,67,.4)}
+  .sync-size.danger{color:var(--red);border-color:rgba(229,89,79,.4)}
   @keyframes sync-pulse{to{opacity:.25}}
   .footer-link{background:none;border:1px solid var(--line2);color:var(--muted);font-size:12px;font-weight:600;padding:7px 13px;border-radius:6px}
   .footer-link:hover{border-color:var(--gold);color:var(--gold)}
@@ -480,6 +483,7 @@ SOL s 150.2 149.1"></textarea>
   <div class="foot-main">
     <span>기록은 이 브라우저에 저장됩니다 · <span id="foot-count">0</span>건</span>
     <span class="sync-state" id="sync-status">동기화 확인 중</span>
+    <span class="sync-size" id="sync-size">용량 계산 중</span>
   </div>
   <div class="foot-actions">
     <button class="footer-link" id="sync-setup">동기화 설정</button>
@@ -1300,11 +1304,17 @@ async function addShot(id,data){
   scheduleAutoSync('shot-add');
 }
 function delShot(id){idbDel(id);try{localStorage.removeItem('shot_'+id)}catch(e){}}
-function scaleCanvas(img,maxW){
-  const sc=Math.min(1,maxW/img.width);
+function scaleCanvas(img,maxSide){
+  const sc=Math.min(1,maxSide/Math.max(img.width,img.height));
   const cv=document.createElement('canvas');cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);
   cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
   return cv;
+}
+function encodeNewShot(img,original){
+  const cv=scaleCanvas(img,2200);
+  let data=cv.toDataURL('image/webp',0.88);
+  if(!data.startsWith('data:image/webp'))data=cv.toDataURL('image/jpeg',0.9);
+  return original&&original.length<data.length?original:data;
 }
 
 function toggleChart(id){
@@ -1545,10 +1555,10 @@ function handleShotFile(file,id){
   reader.onload=()=>{
     const img=new Image();
     img.onload=async()=>{
-      const hi=scaleCanvas(img,3840).toDataURL('image/png');
-      try{await addShot(id,hi);renderShot(id);toast('스크린샷 추가됨')}
+      const hi=encodeNewShot(img,reader.result);
+      try{await addShot(id,hi);renderShot(id);toast('스크린샷 추가됨 · 자동 압축')}
       catch(e){
-        const lo=scaleCanvas(img,1100).toDataURL('image/jpeg',0.72);
+        const lo=scaleCanvas(img,1400).toDataURL('image/jpeg',0.78);
         try{
           const arr=await getShots(id);arr.push({id:uid(),data:lo,updatedAt:new Date().toISOString()});
           localStorage.setItem('shot_'+id,JSON.stringify(arr));renderShot(id);scheduleAutoSync('shot-add-fallback');toast('스크린샷 저장됨')
@@ -1639,6 +1649,30 @@ document.getElementById('import-file').onchange=e=>{
 /* ---------- encrypted merge sync: Cloudflare Worker + passphrase ---------- */
 const SYNC_AAD='coinlog-sync-v2';
 const SYNC_ITERATIONS=210000;
+const SYNC_WARN_BYTES=18*1024*1024;
+const SYNC_BLOCK_BYTES=22*1024*1024;
+
+function syncSizeText(bytes){
+  if(!Number.isFinite(bytes)||bytes<=0)return '용량 계산 중';
+  return '동기화 '+(bytes/1024/1024).toFixed(bytes<1024*1024?2:1)+'MB / 22MB';
+}
+function updateSyncSize(bytes){
+  if(Number.isFinite(bytes)&&bytes>0)localStorage.setItem('coinLastSyncBytes',String(Math.round(bytes)));
+  else bytes=Number(localStorage.getItem('coinLastSyncBytes')||0);
+  const el=document.getElementById('sync-size');if(!el)return;
+  el.textContent=syncSizeText(bytes);
+  el.className='sync-size'+(bytes>=SYNC_BLOCK_BYTES?' danger':bytes>=SYNC_WARN_BYTES?' warn':'');
+  el.title=bytes>=SYNC_BLOCK_BYTES?'동기화 한도를 넘었습니다. 스크린샷을 줄여야 합니다.':bytes>=SYNC_WARN_BYTES?'동기화 한도에 가까워지고 있습니다.':'암호화되어 서버로 전송되는 전체 데이터 크기';
+}
+function checkedSyncBody(body){
+  const bytes=new TextEncoder().encode(JSON.stringify(body)).length;
+  updateSyncSize(bytes);
+  if(bytes>=SYNC_BLOCK_BYTES)throw new Error('동기화 용량이 22MB를 넘었어요. 일부 스크린샷을 삭제하거나 줄여주세요');
+  if(bytes>=SYNC_WARN_BYTES&&!localStorage.getItem('coinSyncSizeWarned')){
+    localStorage.setItem('coinSyncSizeWarned','1');toast('동기화 용량이 한도에 가까워요 · 스크린샷을 정리해 주세요');
+  }else if(bytes<SYNC_WARN_BYTES)localStorage.removeItem('coinSyncSizeWarned');
+  return body;
+}
 
 function syncCfg(){
   let key=localStorage.getItem('coinSyncKey_v2')||'';
@@ -1848,7 +1882,8 @@ async function runSync(c){
     const merged=mergeStates(local,remote);
     const encrypted=await encryptState(merged,c.key);
     try{
-      await workerRequest(c,'POST',{data:encrypted,baseRevision:remoteReply.revision||null});
+      const upload=checkedSyncBody({data:encrypted,baseRevision:remoteReply.revision||null});
+      await workerRequest(c,'POST',upload);
       await persistState(merged);
       local=merged;
       localStorage.setItem('coinLastSyncAt',new Date().toISOString());
@@ -1922,7 +1957,8 @@ document.getElementById('sync-key-change').onclick=async()=>{
     const merged=mergeStates(await collectLocalState(),remote);
     const encrypted=await encryptState(merged,nextKey);
     const newAuthToken=await syncAuthToken(nextKey);
-    await workerRequest(c,'POST',{data:encrypted,baseRevision:remoteReply.revision||null,newAuthToken},'/rotate');
+    const upload=checkedSyncBody({data:encrypted,baseRevision:remoteReply.revision||null,newAuthToken});
+    await workerRequest(c,'POST',upload,'/rotate');
     await persistState(merged);
     localStorage.setItem('coinSyncKey_v2',nextKey);sessionStorage.removeItem('coinSyncKey_v2');updateSyncUI();
     localStorage.setItem('coinLastSyncAt',new Date().toISOString());localStorage.removeItem('coinLastSyncError');
@@ -1936,6 +1972,7 @@ bindPaste();
 setMode('deep');
 updateFootCount();
 updateSyncUI();
+updateSyncSize();
 resetForm();
 scheduleAutoSync('app-open',500);
 </script>
