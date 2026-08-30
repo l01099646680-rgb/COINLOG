@@ -260,6 +260,17 @@
   @keyframes sync-pulse{to{opacity:.25}}
   .footer-link{background:none;border:1px solid var(--line2);color:var(--muted);font-size:12px;font-weight:600;padding:7px 13px;border-radius:6px}
   .footer-link:hover{border-color:var(--gold);color:var(--gold)}
+  .import-modal{position:fixed;inset:0;background:rgba(7,8,12,.78);display:none;align-items:center;justify-content:center;padding:20px;z-index:70}
+  .import-dialog{width:min(520px,100%);background:var(--panel);border:1px solid var(--line2);border-radius:14px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.5)}
+  .import-dialog h3{font-size:17px;margin:0 0 8px}
+  .import-dialog p{font-size:12.5px;color:var(--muted);line-height:1.65;margin:0 0 15px}
+  .import-summary{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:18px}
+  .import-summary div{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--muted)}
+  .import-summary b{display:block;margin-top:4px;color:var(--ink);font-family:var(--mono);font-size:15px}
+  .import-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+  .import-actions button{border:1px solid var(--line2);border-radius:7px;padding:9px 13px;background:none;color:var(--muted);font-weight:700}
+  .import-actions .recommended{background:var(--gold);border-color:var(--gold);color:#191300}
+  .import-actions .danger{color:var(--red);border-color:rgba(229,89,79,.5)}
 
   @media(max-width:720px){
     .grid{grid-template-columns:1fr}
@@ -491,11 +502,32 @@ SOL s 150.2 149.1"></textarea>
     <button class="footer-link" id="sync-key-change">비밀키 변경</button>
     <button class="footer-link" id="export-btn">백업 내보내기</button>
     <button class="footer-link" id="import-btn">백업 가져오기</button>
+    <button class="footer-link" id="import-undo" style="display:none">최근 가져오기 되돌리기</button>
     <input type="file" id="import-file" accept=".json" style="display:none">
   </div>
 </footer>
 
 <div class="toast" id="toast"></div>
+
+<div class="import-modal" id="import-modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
+  <div class="import-dialog">
+    <h3 id="import-title">백업 가져오기</h3>
+    <p>파일 검사가 끝났습니다. 합치기는 현재 기록을 보존하며 최신 항목을 선택합니다. 덮어쓰기는 현재 기록을 백업 파일 상태로 교체합니다.</p>
+    <div class="import-summary">
+      <div>백업 기록<b id="imp-total">0건</b></div>
+      <div>현재 기록<b id="imp-current">0건</b></div>
+      <div>새 기록<b id="imp-new">0건</b></div>
+      <div>중복 기록<b id="imp-dup">0건</b></div>
+      <div>내용 다른 중복<b id="imp-changed">0건</b></div>
+      <div>스크린샷<b id="imp-shots">0개</b></div>
+    </div>
+    <div class="import-actions">
+      <button type="button" id="imp-cancel">중단</button>
+      <button type="button" class="danger" id="imp-overwrite">기존 기록 덮어쓰기</button>
+      <button type="button" class="recommended" id="imp-merge">합치기 (권장)</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const KEY='coinReviewLog_v1';
@@ -505,6 +537,7 @@ let trades=load();
 let tradeTombstones=loadObj(TRADE_TOMB_KEY);
 let shotTombstones=loadObj(SHOT_TOMB_KEY);
 let editId=null;
+let importRunning=false;
 // hex colors for SVG (CSS var() does not work in SVG presentation attributes)
 const C={bg:'#13151b',panel2:'#21252f',line:'#2b303c',line2:'#373d4b',ink:'#e9e7e1',faint:'#5b6271',gold:'#d8a443',jade:'#43b581',red:'#e5594f',short:'#9b7ede'};
 
@@ -1595,55 +1628,159 @@ function lightbox(src){
 }
 
 /* ---------- backup: export / import (trades + screenshots) ---------- */
+const PRE_IMPORT_SNAPSHOT='__coinlog_pre_import_v2__';
 function updateFootCount(){const e=document.getElementById('foot-count');if(e)e.textContent=trades.length}
+async function buildBackupPayload(){
+  const shots={};
+  for(const t of trades){
+    const arr=await getShots(t.id);
+    if(arr&&arr.length)shots[t.id]=arr;
+  }
+  return JSON.parse(JSON.stringify({app:'coinlog',version:2,exportedAt:new Date().toISOString(),trades,shots,tradeTombstones,shotTombstones}));
+}
+function downloadBackupPayload(payload,prefix='coinlog'){
+  const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a'),d=new Date();
+  const stamp=d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate())+'-'+pad2(d.getHours())+pad2(d.getMinutes());
+  a.href=url;a.download=prefix+'-'+stamp+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 document.getElementById('export-btn').onclick=async()=>{
   try{
-    const shots={};
-    for(const t of trades){
-      const arr=await getShots(t.id);
-      if(arr&&arr.length)shots[t.id]=arr;
-    }
-    const payload={app:'coinlog',version:2,exportedAt:new Date().toISOString(),trades,shots,tradeTombstones,shotTombstones};
-    const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    const d=new Date();
-    a.href=url;a.download='coinlog-'+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate())+'.json';
-    a.click();URL.revokeObjectURL(url);
+    const payload=await buildBackupPayload();downloadBackupPayload(payload);
     toast('백업 내보냄 · '+trades.length+'건');
   }catch(e){toast('내보내기 실패: '+e.message)}
 };
-document.getElementById('import-btn').onclick=()=>document.getElementById('import-file').click();
+
+function validateBackupData(data){
+  const raw=Array.isArray(data)?{app:'coinlog',version:1,trades:data}:data;
+  if(!raw||typeof raw!=='object')throw new Error('백업 파일 형식이 올바르지 않아요');
+  if(raw.app&&raw.app!=='coinlog')throw new Error('COINLOG 백업 파일이 아니에요');
+  if(Number(raw.version||1)>2)throw new Error('현재 앱보다 새로운 백업 형식이에요');
+  if(!Array.isArray(raw.trades))throw new Error('거래 기록 목록이 없어요');
+  const ids=new Set();
+  for(const t of raw.trades){
+    if(!t||typeof t!=='object'||typeof t.id!=='string'||!t.id.trim())throw new Error('ID가 없는 거래 기록이 있어요');
+    if(ids.has(t.id))throw new Error('같은 ID의 거래가 백업에 중복되어 있어요');
+    ids.add(t.id);
+  }
+  if(raw.shots!==undefined&&(raw.shots===null||typeof raw.shots!=='object'||Array.isArray(raw.shots)))throw new Error('스크린샷 형식이 올바르지 않아요');
+  for(const arr of Object.values(raw.shots||{})){
+    if(!Array.isArray(arr))throw new Error('스크린샷 목록이 손상됐어요');
+    for(const shot of arr){
+      const value=typeof shot==='string'?shot:shot&&shot.data;
+      if(typeof value!=='string'||!value.startsWith('data:image/'))throw new Error('읽을 수 없는 스크린샷이 있어요');
+    }
+  }
+  return normalizeState(raw);
+}
+function importSummary(incoming){
+  const currentMap=new Map(trades.map(t=>[t.id,t]));
+  let fresh=0,duplicate=0,changed=0,shots=0;
+  for(const t of incoming.trades){
+    const old=currentMap.get(t.id);
+    if(!old)fresh++;
+    else{duplicate++;if(JSON.stringify(old)!==JSON.stringify(t))changed++}
+  }
+  for(const arr of Object.values(incoming.shots||{}))shots+=arr.length;
+  return {total:incoming.trades.length,current:trades.length,fresh,duplicate,changed,shots};
+}
+function showImportDialog(summary){
+  const modal=document.getElementById('import-modal');
+  document.getElementById('imp-total').textContent=summary.total+'건';
+  document.getElementById('imp-current').textContent=summary.current+'건';
+  document.getElementById('imp-new').textContent=summary.fresh+'건';
+  document.getElementById('imp-dup').textContent=summary.duplicate+'건';
+  document.getElementById('imp-changed').textContent=summary.changed+'건';
+  document.getElementById('imp-shots').textContent=summary.shots+'개';
+  modal.style.display='flex';
+  return new Promise(resolve=>{
+    const finish=choice=>{modal.style.display='none';window.removeEventListener('keydown',onKey);resolve(choice)};
+    const onKey=e=>{if(e.key==='Escape')finish(null)};
+    window.addEventListener('keydown',onKey);
+    document.getElementById('imp-merge').onclick=()=>finish('merge');
+    document.getElementById('imp-overwrite').onclick=()=>finish('overwrite');
+    document.getElementById('imp-cancel').onclick=()=>finish(null);
+    modal.onclick=e=>{if(e.target===modal)finish(null)};
+    document.getElementById('imp-merge').focus();
+  });
+}
+function makeOverwriteState(currentRaw,incomingRaw){
+  const current=normalizeState(currentRaw),incoming=normalizeState(incomingRaw),now=new Date().toISOString();
+  const liveIds=new Set(incoming.trades.map(t=>t.id));
+  const tradeDeletes={...incoming.tradeTombstones};
+  for(const t of current.trades)if(!liveIds.has(t.id))tradeDeletes[t.id]=now;
+  const nextTrades=incoming.trades.map(t=>Object.assign({},t,{updatedAt:now,createdAt:t.createdAt||t.date||now}));
+  const shots={},shotDeletes=normalizeShotTombs(incoming.shotTombstones);
+  for(const t of nextTrades){
+    const arr=(incoming.shots[t.id]||[]).map(s=>Object.assign({},s,{updatedAt:now}));
+    if(arr.length)shots[t.id]=arr;
+  }
+  for(const [tradeId,arr] of Object.entries(current.shots||{})){
+    const kept=new Set((shots[tradeId]||[]).map(s=>s.id));
+    for(const shot of arr){
+      if(kept.has(shot.id))continue;
+      if(!shotDeletes[tradeId])shotDeletes[tradeId]={};
+      shotDeletes[tradeId][shot.id]=now;
+    }
+  }
+  return {app:'coinlog',version:2,restoredAt:now,trades:nextTrades,shots,tradeTombstones:tradeDeletes,shotTombstones:shotDeletes};
+}
+async function updateImportUndoUI(){
+  const b=document.getElementById('import-undo');if(!b)return;
+  b.style.display=(await idbGet(PRE_IMPORT_SNAPSHOT))?'':'none';
+}
+
+document.getElementById('import-btn').onclick=()=>{
+  if(syncRunning){toast('자동 동기화가 끝난 뒤 다시 눌러주세요');return}
+  document.getElementById('import-file').click();
+};
 document.getElementById('import-file').onchange=e=>{
   const file=e.target.files[0];if(!file)return;
+  if(syncRunning){toast('자동 동기화가 끝난 뒤 다시 시도해 주세요');e.target.value='';return}
+  importRunning=true;
+  if(autoSyncTimer){clearTimeout(autoSyncTimer);autoSyncTimer=null}
   const reader=new FileReader();
   reader.onload=async ev=>{
+    let before=null,applied=false;
     try{
       const data=JSON.parse(ev.target.result);
-      const incoming=Array.isArray(data)?data:data.trades;
-      if(!Array.isArray(incoming))throw new Error('형식이 올바르지 않아요');
-      const merge=confirm(incoming.length+'건을 가져옵니다.\n\n[확인] 기존 '+trades.length+'건과 합치기\n[취소] 기존 데이터 덮어쓰기');
-      if(merge){
-        const ids=new Set(trades.map(t=>t.id));
-        incoming.forEach(t=>{if(!ids.has(t.id))trades.push(t)});
-      }else{
-        trades=incoming;
-        tradeTombstones=data.tradeTombstones||{};
-        shotTombstones=data.shotTombstones||{};
-      }
-      save();saveSyncMeta();
-      if(data.shots){
-        for(const [id,arr] of Object.entries(data.shots)){
-          try{await saveShots(id,arr)}catch(err){}
-        }
-      }
-      updateFootCount();renderList();
-      scheduleAutoSync('backup-import');
+      const incoming=validateBackupData(data),choice=await showImportDialog(importSummary(incoming));
+      if(!choice){toast('가져오기를 중단했어요');return}
+      before=await buildBackupPayload();
+      await idbSet(PRE_IMPORT_SNAPSHOT,before);
+      localStorage.setItem('coinPreImportAt',new Date().toISOString());
+      downloadBackupPayload(before,'coinlog-before-import');
+      const next=choice==='merge'?mergeStates(before,incoming):makeOverwriteState(before,incoming);
+      await persistState(next);applied=true;
+      await updateImportUndoUI();
       toast('가져오기 완료 · 총 '+trades.length+'건');
-    }catch(err){toast('가져오기 실패: '+err.message)}
+    }catch(err){
+      if(before){
+        try{await persistState(before);if(!applied){await idbDel(PRE_IMPORT_SNAPSHOT);localStorage.removeItem('coinPreImportAt')}}
+        catch(rollbackErr){toast('복구 실패 · 자동 저장된 가져오기 전 백업을 사용하세요');return}
+      }
+      toast('가져오기 실패 · 원래 상태 유지: '+err.message);
+    }finally{
+      importRunning=false;e.target.value='';updateImportUndoUI();
+      if(applied||syncQueued){syncQueued=false;scheduleAutoSync(applied?'backup-import':'import-finished',300)}
+    }
   };
+  reader.onerror=()=>{importRunning=false;e.target.value='';toast('백업 파일을 읽지 못했어요')};
   reader.readAsText(file);
-  e.target.value='';
+};
+
+document.getElementById('import-undo').onclick=async()=>{
+  if(syncRunning||importRunning){toast('현재 작업이 끝난 뒤 다시 눌러주세요');return}
+  const snapshot=await idbGet(PRE_IMPORT_SNAPSHOT);
+  if(!snapshot){updateImportUndoUI();toast('되돌릴 가져오기 기록이 없어요');return}
+  if(!confirm('가져오기 직전 상태로 되돌릴까요?\n현재 상태도 자동 동기화되므로 신중하게 확인하세요.'))return;
+  importRunning=true;
+  try{
+    const current=await collectLocalState(),restored=makeOverwriteState(current,snapshot);
+    await persistState(restored);await idbDel(PRE_IMPORT_SNAPSHOT);localStorage.removeItem('coinPreImportAt');
+    toast('가져오기 전 상태로 복구했어요');
+  }catch(err){toast('되돌리기 실패: '+err.message)}
+  finally{importRunning=false;updateImportUndoUI();scheduleAutoSync('import-undo',300)}
 };
 
 /* ---------- encrypted merge sync: Cloudflare Worker + passphrase ---------- */
@@ -1895,6 +2032,7 @@ async function runSync(c){
 
 let syncRunning=false,syncQueued=false,autoSyncTimer=null;
 function scheduleAutoSync(reason,delay=900){
+  if(importRunning){syncQueued=true;return}
   if(!syncReady()||navigator.onLine===false){updateSyncStatus();return}
   if(autoSyncTimer)clearTimeout(autoSyncTimer);
   autoSyncTimer=setTimeout(()=>{autoSyncTimer=null;performSync(false)},delay);
@@ -1973,6 +2111,7 @@ setMode('deep');
 updateFootCount();
 updateSyncUI();
 updateSyncSize();
+updateImportUndoUI();
 resetForm();
 scheduleAutoSync('app-open',500);
 </script>
