@@ -103,6 +103,8 @@
   .mini-btn:hover{border-color:var(--gold);color:var(--gold)}
   .computed{font-family:var(--mono);font-size:12px;color:var(--faint)}
   .computed b{color:var(--ink)}
+  .field-error{display:none;color:var(--red);font-size:11.5px;font-weight:600;line-height:1.45}
+  .field-error.show{display:block}
 
   .toggle-pair{display:flex;gap:6px}
   .seg{flex:1;background:var(--panel2);border:1px solid var(--line2);color:var(--muted);padding:9px;border-radius:7px;font-size:13px;font-weight:700;text-align:center;transition:.12s}
@@ -316,6 +318,7 @@
         <div class="field">
           <label>손절가 <span class="hint">R배수 계산용, 선택</span></label>
           <input type="number" id="f-stop" step="any" placeholder="0">
+          <div class="field-error" id="stop-error"></div>
         </div>
         <div class="field deep-only">
           <label>레버리지 <span class="hint">선택, 기본 1</span></label>
@@ -447,7 +450,7 @@ SOL s 150.2 149.1"></textarea>
     <div class="filters">
       <input type="text" id="flt-search" placeholder="종목 / 메모 검색">
       <select id="flt-dir"><option value="">방향 전체</option><option value="long">롱</option><option value="short">숏</option></select>
-      <select id="flt-result"><option value="">결과 전체</option><option value="win">수익</option><option value="loss">손실</option></select>
+      <select id="flt-result"><option value="">결과 전체</option><option value="win">가격 기준 수익</option><option value="loss">가격 기준 손실</option></select>
       <select id="flt-emo"><option value="">감정 전체</option></select>
       <span class="count-tag" id="count-tag"></span>
     </div>
@@ -465,8 +468,8 @@ SOL s 150.2 149.1"></textarea>
   <span>기록은 이 브라우저에 저장됩니다 · <span id="foot-count">0</span>건</span>
   <div class="foot-actions">
     <button class="footer-link" id="sync-setup">동기화 설정</button>
-    <button class="footer-link" id="sync-up">↑ 올리기</button>
-    <button class="footer-link" id="sync-down">↓ 내려받기</button>
+    <button class="footer-link" id="sync-now">↻ 동기화</button>
+    <button class="footer-link" id="sync-key-change">비밀키 변경</button>
     <button class="footer-link" id="export-btn">백업 내보내기</button>
     <button class="footer-link" id="import-btn">백업 가져오기</button>
     <input type="file" id="import-file" accept=".json" style="display:none">
@@ -477,7 +480,11 @@ SOL s 150.2 149.1"></textarea>
 
 <script>
 const KEY='coinReviewLog_v1';
+const TRADE_TOMB_KEY='coinTradeTombstones_v2';
+const SHOT_TOMB_KEY='coinShotTombstones_v2';
 let trades=load();
+let tradeTombstones=loadObj(TRADE_TOMB_KEY);
+let shotTombstones=loadObj(SHOT_TOMB_KEY);
 let editId=null;
 // hex colors for SVG (CSS var() does not work in SVG presentation attributes)
 const C={bg:'#13151b',panel2:'#21252f',line:'#2b303c',line2:'#373d4b',ink:'#e9e7e1',faint:'#5b6271',gold:'#d8a443',jade:'#43b581',red:'#e5594f',short:'#9b7ede'};
@@ -485,7 +492,12 @@ const C={bg:'#13151b',panel2:'#21252f',line:'#2b303c',line2:'#373d4b',ink:'#e9e7
 const sel={setup:new Set(),emo:new Set(),mistake:new Set(),dir:'long',plan:null};
 
 function load(){try{return JSON.parse(localStorage.getItem(KEY))||[]}catch(e){return[]}}
+function loadObj(key){try{const v=JSON.parse(localStorage.getItem(key));return v&&typeof v==='object'&&!Array.isArray(v)?v:{}}catch(e){return{}}}
 function save(){localStorage.setItem(KEY,JSON.stringify(trades));const e=document.getElementById('foot-count');if(e)e.textContent=trades.length}
+function saveSyncMeta(){
+  localStorage.setItem(TRADE_TOMB_KEY,JSON.stringify(tradeTombstones));
+  localStorage.setItem(SHOT_TOMB_KEY,JSON.stringify(shotTombstones));
+}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800)}
 function fmt(n,d=2){return (n>=0?'+':'')+Number(n).toFixed(d)}
@@ -518,6 +530,7 @@ document.querySelectorAll('#f-dir .seg').forEach(s=>s.onclick=()=>{
   sel.dir=s.dataset.v;
   document.querySelectorAll('#f-dir .seg').forEach(x=>{x.classList.remove('on-long','on-short')});
   s.classList.add(s.dataset.v==='long'?'on-long':'on-short');
+  refreshCalc();
 });
 /* plan toggle */
 document.querySelectorAll('#f-plan .seg').forEach(s=>s.onclick=()=>{
@@ -538,18 +551,37 @@ function computePnl(){
   const base=sel.dir==='long'?(x-e)/e:(e-x)/e;
   return base*100*lev;
 }
+function stopRuleError(dir,entry,stop){
+  if(stop===null||stop===undefined||stop==='')return '';
+  const e=Number(entry),st=Number(stop);
+  if(!Number.isFinite(e)||e<=0)return '손절가를 입력하려면 진입가가 필요해요';
+  if(!Number.isFinite(st)||st<=0)return '손절가는 0보다 큰 숫자여야 해요';
+  if(dir==='long'&&st>=e)return '롱 손절가는 진입가보다 낮아야 해요';
+  if(dir==='short'&&st<=e)return '숏 손절가는 진입가보다 높아야 해요';
+  if(dir!=='long'&&dir!=='short')return '거래 방향을 확인해 주세요';
+  return '';
+}
+function currentStopError(){
+  return stopRuleError(sel.dir,document.getElementById('f-entry').value,document.getElementById('f-stop').value);
+}
+function showStopError(msg){
+  const el=document.getElementById('stop-error');
+  if(!el)return;
+  el.textContent=msg||'';
+  el.classList.toggle('show',!!msg);
+}
 function computeR(){
   const e=parseFloat(document.getElementById('f-entry').value);
   const x=parseFloat(document.getElementById('f-exit').value);
   const st=parseFloat(document.getElementById('f-stop').value);
-  if(!e||!x||!st)return null;
+  if(!e||!x||!st||stopRuleError(sel.dir,e,st))return null;
   const risk=Math.abs(e-st);
-  if(risk===0)return null;
   const rr=sel.dir==='long'?(x-e)/risk:(e-x)/risk;
   return rr;
 }
 function refreshCalc(){
   const p=computePnl(),r=computeR();
+  showStopError(currentStopError());
   const out=document.getElementById('calc-out');
   let s=[];
   if(p!==null)s.push('손익 <b>'+fmt(p)+'%</b>');
@@ -570,8 +602,12 @@ document.getElementById('btn-save').onclick=()=>{
   let pnl=parseFloat(document.getElementById('f-pnl').value);
   if(isNaN(pnl))pnl=computePnl();
   if(!symbol){toast('종목을 입력하세요');return}
+  const stopErr=currentStopError();
+  if(stopErr){showStopError(stopErr);toast(stopErr);return}
   if(pnl===null||isNaN(pnl)){toast('손익률을 입력하거나 가격으로 계산하세요');return}
   const dt=buildISO('f-date-d','f-date-t');
+  const now=new Date().toISOString();
+  const previous=editId?trades.find(x=>x.id===editId):null;
   const t={
     id:editId||uid(),
     symbol,
@@ -592,10 +628,12 @@ document.getElementById('btn-save').onclick=()=>{
     plan:sel.plan,
     thesis:document.getElementById('f-thesis').value.trim(),
     lesson:document.getElementById('f-lesson').value.trim(),
+    createdAt:previous&&previous.createdAt?previous.createdAt:now,
+    updatedAt:now,
   };
-  if(editId){trades=trades.map(x=>x.id===editId?t:x);toast('수정 완료')}
+  if(editId){trades=trades.map(x=>x.id===editId?t:x);delete tradeTombstones[editId];toast('수정 완료')}
   else{trades.unshift(t);toast(quickMode?'추가됨 · 다음 건 입력':'기록 저장됨 — 잘했다')}
-  save();
+  save();saveSyncMeta();
   if(quickMode&&!editId)quickReset();else resetForm();
 };
 document.getElementById('btn-reset').onclick=resetForm;
@@ -634,7 +672,7 @@ document.getElementById('bulk-add').onclick=()=>{
     let tf='';
     for(let i=4;i<p.length;i++){const k=TFMAP[p[i].toLowerCase()];if(k)tf=k}
     const g=dir==='long'?(exit-entry)/entry*100:(entry-exit)/entry*100;
-    trades.unshift({id:uid(),symbol:p[0].toUpperCase(),dir,entry,exit,stop:null,lev:null,pnl:+g.toFixed(2),r:null,tf,date:now,exitDate:null,setup:[],emo:[],mistake:[],plan:null,thesis:'',lesson:''});
+    trades.unshift({id:uid(),symbol:p[0].toUpperCase(),dir,entry,exit,stop:null,lev:null,pnl:+g.toFixed(2),r:null,tf,date:now,exitDate:null,setup:[],emo:[],mistake:[],plan:null,thesis:'',lesson:'',createdAt:now,updatedAt:now});
     added++;
   });
   if(added){save();document.getElementById('bulk-text').value='';toast(added+'건 추가됨'+(fail?' · '+fail+'건 형식오류':''))}
@@ -651,6 +689,7 @@ function resetForm(){
   document.querySelector('#f-dir .seg[data-v=long]').classList.add('on-long');
   document.querySelectorAll('#f-plan .seg').forEach(x=>x.classList.remove('on-yes','on-no'));
   document.getElementById('calc-out').innerHTML='';
+  showStopError('');
   document.getElementById('edit-note').style.display='none';
   setNow();
 }
@@ -736,7 +775,8 @@ function editTrade(id){
 }
 function delTrade(id){
   if(!confirm('이 기록을 삭제할까요?'))return;
-  trades=trades.filter(x=>x.id!==id);delShot(id);save();renderList();toast('삭제됨');
+  tradeTombstones[id]=new Date().toISOString();
+  trades=trades.filter(x=>x.id!==id);delShot(id);save();saveSyncMeta();renderList();toast('삭제됨');
 }
 
 /* ---------- list ---------- */
@@ -746,8 +786,14 @@ function priceChg(t){
   const lev=(t.lev&&t.lev>0)?t.lev:1;
   return (t.pnl||0)/lev;
 }
-/* R multiple: only when a stop was entered (its true risk basis). No auto-fabrication. */
-function getR(t){return t.r!=null?t.r:null;}
+/* R multiple: recompute only from a valid stop on the correct side of entry. */
+function getR(t){
+  if(!t||t.stop===null||t.stop===undefined||t.stop==='')return null;
+  const e=Number(t.entry),x=Number(t.exit),st=Number(t.stop);
+  if(stopRuleError(t.dir,e,st)||!Number.isFinite(x)||x<=0)return null;
+  const risk=Math.abs(e-st);
+  return t.dir==='long'?(x-e)/risk:(e-x)/risk;
+}
 function buildEmoFilter(){
   const set=new Set();trades.forEach(t=>t.emo.forEach(e=>set.add(e)));
   const sel=document.getElementById('flt-emo');const cur=sel.value;
@@ -762,8 +808,9 @@ function renderList(){
   const fe=document.getElementById('flt-emo').value;
   let rows=trades.filter(t=>{
     if(fd&&t.dir!==fd)return false;
-    if(fr==='win'&&t.pnl<=0)return false;
-    if(fr==='loss'&&t.pnl>=0)return false;
+    const result=priceChg(t);
+    if(fr==='win'&&result<=0)return false;
+    if(fr==='loss'&&result>=0)return false;
     if(fe&&!t.emo.includes(fe))return false;
     if(q&&!(t.symbol.toLowerCase().includes(q)||(t.thesis||'').toLowerCase().includes(q)||(t.lesson||'').toLowerCase().includes(q)))return false;
     return true;
@@ -777,6 +824,7 @@ function renderList(){
   }
   box.innerHTML=rows.map(t=>{
     const g=priceChg(t);
+    const rv=getR(t);
     const cls=g>0?'win':g<0?'loss':'flat';
     const d=new Date(t.date);
     const dstr=d.getFullYear()+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
@@ -800,7 +848,7 @@ function renderList(){
       '<div class="trade-top"><span class="sym">'+esc(t.symbol)+'</span>'+
       '<span class="dir '+t.dir+'">'+(t.dir==='long'?'롱':'숏')+'</span>'+
       '<span class="pnl '+cls+'">'+fmt(g)+'%</span>'+
-      (t.r!=null?'<span class="r-badge">'+fmt(t.r)+'R</span>':'')+
+      (rv!=null?'<span class="r-badge">'+fmt(rv)+'R</span>':'')+
       '<span class="lev-pnl">레버 '+fmt(t.pnl)+'%</span></div>'+
       '<div class="trade-meta">'+meta.map(m=>'<span>'+esc(String(m))+'</span>').join('')+'</div>'+
       (tags.length?'<div class="trade-tags">'+tags.join('')+'</div>':'')+
@@ -959,9 +1007,9 @@ function renderStats(){
   const avgWin=wins.length?wins.reduce((a,t)=>a+priceChg(t),0)/wins.length:0;
   const avgLoss=losses.length?losses.reduce((a,t)=>a+priceChg(t),0)/losses.length:0;
 
-  let html='<div class="sample-note">이 통계는 <b>기록한 '+trades.length+'건</b> 기준이에요. 일부만 복기했다면 승률·평균은 실제 성과가 아니라 <b>기록한 매매들 사이의 패턴</b>(감정별·셋업별 비교)으로 보는 게 맞아요.</div>'+
+  let html='<div class="sample-note">이 통계는 <b>기록한 '+trades.length+'건</b> 기준이며, 수익·손실과 방향 적중률은 <b>진입가·청산가의 가격변화율</b>로 판정해요. 실제 계좌 손익은 실현손익(USDT)을 따로 보세요. 일부만 복기했다면 평균은 실제 성과가 아니라 <b>기록한 매매들 사이의 패턴</b>(감정별·셋업별 비교)으로 보는 게 맞아요.</div>'+ 
     '<div class="stat-grid">'+
-    stat('승률',(decided?wr.toFixed(1):'—')+'<small>%</small>',wr>=50?'win':'loss')+
+    stat('방향 적중률 (가격)',(decided?wr.toFixed(1):'—')+'<small>%</small>',wr>=50?'win':'loss')+
     stat('총 거래',trades.length+'<small>건</small>')+
     stat('누적 변화율',fmt(cum,1)+'<small>%</small>',cum>=0?'win':'loss')+
     stat('평균 변화율',fmt(avg,2)+'<small>%</small>',avg>=0?'win':'loss')+
@@ -1216,12 +1264,25 @@ async function getShots(id){
   let v=await idbGet(id);
   if(v==null){try{const ls=localStorage.getItem('shot_'+id);if(ls)v=ls}catch(e){}}
   if(v==null)return [];
-  if(typeof v==='string')return [{id:'legacy',data:v}];
-  if(Array.isArray(v))return v;
+  if(typeof v==='string'){
+    try{const parsed=JSON.parse(v);if(Array.isArray(parsed))v=parsed;else return [{id:'legacy',data:v,updatedAt:tradeTime(id)}]}
+    catch(e){return [{id:'legacy',data:v,updatedAt:tradeTime(id)}]}
+  }
+  if(Array.isArray(v))return v.filter(s=>s&&s.data).map(s=>({id:s.id||uid(),data:s.data,updatedAt:s.updatedAt||tradeTime(id)}));
   return [];
 }
+function tradeTime(id){
+  const t=trades.find(x=>x.id===id);
+  return (t&&(t.updatedAt||t.date))||'1970-01-01T00:00:00.000Z';
+}
 function saveShots(id,arr){return idbSet(id,arr)}
-async function addShot(id,data){const arr=await getShots(id);arr.push({id:uid(),data});await saveShots(id,arr);try{localStorage.removeItem('shot_'+id)}catch(e){}}
+async function addShot(id,data){
+  const arr=await getShots(id),imgId=uid();
+  arr.push({id:imgId,data,updatedAt:new Date().toISOString()});
+  if(shotTombstones[id])delete shotTombstones[id][imgId];
+  await saveShots(id,arr);saveSyncMeta();
+  try{localStorage.removeItem('shot_'+id)}catch(e){}
+}
 function delShot(id){idbDel(id);try{localStorage.removeItem('shot_'+id)}catch(e){}}
 function scaleCanvas(img,maxW){
   const sc=Math.min(1,maxW/img.width);
@@ -1384,7 +1445,7 @@ function drawCandles(candles,t,entryMs,exitMs){
   if(rPath)rsiSvg+='<path d="'+rPath.trim()+'" fill="none" stroke="'+rsiCol+'" stroke-width="1.4"/>';
   let lastRsi=null;for(let i=n-1;i>=0;i--){if(rsi[i]!=null){lastRsi=rsi[i];break}}
   rsiSvg+='<text x="'+padL+'" y="'+(rTop+13).toFixed(1)+'" font-size="10" font-family="monospace" fill="'+C.faint+'">RSI 14'+(lastRsi!=null?' · '+lastRsi.toFixed(1):'')+'</text>';
-  const exitColor=t.pnl>=0?C.jade:C.red;
+  const exitColor=priceChg(t)>=0?C.jade:C.red;
   const priceItems=[{p:t.entry,color:C.gold,label:'진입'},{p:t.stop,color:C.red,label:'손절'},{p:t.exit,color:exitColor,label:'청산'}]
     .filter(o=>o.p).map(o=>{const g=plineY(o.p);return {p:o.p,color:o.color,label:o.label,y:g.y,suffix:g.suffix}});
   const labeled=priceItems.map(o=>({...o,ly:o.y})).sort((a,b)=>a.ly-b.ly);
@@ -1472,7 +1533,10 @@ function handleShotFile(file,id){
       try{await addShot(id,hi);renderShot(id);toast('스크린샷 추가됨')}
       catch(e){
         const lo=scaleCanvas(img,1100).toDataURL('image/jpeg',0.72);
-        try{localStorage.setItem('shot_'+id,lo);renderShot(id);toast('스크린샷 저장됨')}
+        try{
+          const arr=await getShots(id);arr.push({id:uid(),data:lo,updatedAt:new Date().toISOString()});
+          localStorage.setItem('shot_'+id,JSON.stringify(arr));renderShot(id);toast('스크린샷 저장됨')
+        }
         catch(e2){toast('저장 공간 부족 — 오래된 스크린샷을 지워보세요')}
       }
     };
@@ -1484,9 +1548,11 @@ async function removeShot(id,imgId){
   if(!confirm('이 스크린샷을 삭제할까요?'))return;
   let arr=await getShots(id);
   arr=arr.filter(s=>s.id!==imgId);
+  if(!shotTombstones[id])shotTombstones[id]={};
+  shotTombstones[id][imgId]=new Date().toISOString();
   if(arr.length){try{await saveShots(id,arr)}catch(e){}}else await idbDel(id);
   try{localStorage.removeItem('shot_'+id)}catch(e){}
-  renderShot(id);
+  saveSyncMeta();renderShot(id);
 }
 function lightbox(src){
   const d=document.createElement('div');d.className='lightbox';
@@ -1511,7 +1577,7 @@ document.getElementById('export-btn').onclick=async()=>{
       const arr=await getShots(t.id);
       if(arr&&arr.length)shots[t.id]=arr;
     }
-    const payload={app:'coinlog',version:1,exportedAt:new Date().toISOString(),trades,shots};
+    const payload={app:'coinlog',version:2,exportedAt:new Date().toISOString(),trades,shots,tradeTombstones,shotTombstones};
     const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
@@ -1536,8 +1602,10 @@ document.getElementById('import-file').onchange=e=>{
         incoming.forEach(t=>{if(!ids.has(t.id))trades.push(t)});
       }else{
         trades=incoming;
+        tradeTombstones=data.tradeTombstones||{};
+        shotTombstones=data.shotTombstones||{};
       }
-      save();
+      save();saveSyncMeta();
       if(data.shots){
         for(const [id,arr] of Object.entries(data.shots)){
           try{await saveShots(id,arr)}catch(err){}
@@ -1551,61 +1619,228 @@ document.getElementById('import-file').onchange=e=>{
   e.target.value='';
 };
 
-/* ---------- sync: Cloudflare Worker + passphrase ---------- */
+/* ---------- encrypted merge sync: Cloudflare Worker + passphrase ---------- */
+const SYNC_AAD='coinlog-sync-v2';
+const SYNC_ITERATIONS=210000;
+
 function syncCfg(){
-  return {url:localStorage.getItem('coinSyncUrl')||'',key:localStorage.getItem('coinSyncKey')||''};
+  return {url:localStorage.getItem('coinSyncUrl')||'',key:sessionStorage.getItem('coinSyncKey_v2')||''};
 }
-function syncReady(){const c=syncCfg();return c.url&&c.key.length>=8}
+function syncReady(){const c=syncCfg();return !!c.url&&c.key.length>=12}
 function updateSyncUI(){
   const b=document.getElementById('sync-setup');
   if(b)b.textContent=syncReady()?'동기화 설정 ✓':'동기화 설정';
 }
+try{localStorage.removeItem('coinSyncKey')}catch(e){}
+
 document.getElementById('sync-setup').onclick=()=>{
   const c=syncCfg();
-  const url=prompt('동기화 서버 주소 (Cloudflare Worker)\n예: https://coinlog-sync.내계정.workers.dev\n\n비우면 동기화 끄기',c.url);
+  const url=prompt('동기화 서버 주소 (Cloudflare Worker)\n예: https://coinlog-sync.내계정.workers.dev\n\n비우면 이 기기의 동기화를 끕니다.',c.url);
   if(url===null)return;
-  if(!url.trim()){localStorage.removeItem('coinSyncUrl');localStorage.removeItem('coinSyncKey');updateSyncUI();toast('동기화 껐어요');return}
-  const key=prompt('비밀 키 (8자 이상)\n\n※ PC와 폰에 똑같이 입력해야 같은 기록을 봐요.\n※ 이 키를 모르면 누구도 기록을 볼 수 없어요.',c.key);
+  if(!url.trim()){
+    localStorage.removeItem('coinSyncUrl');sessionStorage.removeItem('coinSyncKey_v2');
+    updateSyncUI();toast('이 기기의 동기화를 껐어요');return;
+  }
+  const key=prompt('새 비밀키 (12자 이상, 16자 이상 권장)\n\nPC와 폰에 한 글자도 다르지 않게 입력하세요.\n서버로 원문 비밀키는 보내지 않으며, 브라우저를 닫으면 이 기기에서 지워집니다.\n\n이미 입력한 키를 유지하려면 비워 두세요.','');
   if(key===null)return;
-  if(key.trim().length<8){toast('비밀 키는 8자 이상이어야 해요');return}
+  const nextKey=key.trim()||c.key;
+  if(nextKey.length<12){toast('비밀키는 12자 이상이어야 해요');return}
+  if(!window.crypto||!crypto.subtle){toast('이 브라우저는 암호화를 지원하지 않아요');return}
   localStorage.setItem('coinSyncUrl',url.trim().replace(/\/+$/,''));
-  localStorage.setItem('coinSyncKey',key.trim());
+  sessionStorage.setItem('coinSyncKey_v2',nextKey);
   updateSyncUI();toast('동기화 설정 완료');
 };
-async function collectShots(){
-  const shots={};
-  for(const t of trades){const arr=await getShots(t.id);if(arr&&arr.length)shots[t.id]=arr}
-  return shots;
+
+function timeMs(v){const n=Date.parse(v||'');return Number.isFinite(n)?n:0}
+function latestIso(a,b){return timeMs(a)>=timeMs(b)?a:b}
+function tradeStamp(t){return (t&&(t.updatedAt||t.date||t.createdAt))||'1970-01-01T00:00:00.000Z'}
+function normalizeTombs(v){
+  const out={};
+  if(!v||typeof v!=='object')return out;
+  for(const [id,ts] of Object.entries(v)){if(typeof ts==='string')out[id]=ts}
+  return out;
 }
-document.getElementById('sync-up').onclick=async()=>{
-  if(!syncReady()){toast('먼저 동기화 설정을 해주세요');return}
-  const c=syncCfg();
-  toast('올리는 중…');
+function normalizeShotTombs(v){
+  const out={};
+  if(!v||typeof v!=='object')return out;
+  for(const [tradeId,items] of Object.entries(v))out[tradeId]=normalizeTombs(items);
+  return out;
+}
+function normalizeState(raw){
+  const s=raw&&typeof raw==='object'?raw:{};
+  const list=Array.isArray(s.trades)?s.trades:[];
+  const cleanTrades=list.filter(t=>t&&t.id).map(t=>{
+    const stamp=tradeStamp(t);
+    return Object.assign({},t,{createdAt:t.createdAt||stamp,updatedAt:t.updatedAt||stamp});
+  });
+  const byTrade={};
+  const rawShots=s.shots&&typeof s.shots==='object'?s.shots:{};
+  for(const t of cleanTrades){
+    const a=Array.isArray(rawShots[t.id])?rawShots[t.id]:[];
+    const clean=a.map((shot,i)=>typeof shot==='string'?{id:'legacy-'+i,data:shot,updatedAt:tradeStamp(t)}:shot)
+      .filter(shot=>shot&&shot.data)
+      .map((shot,i)=>({id:shot.id||('legacy-'+i),data:shot.data,updatedAt:shot.updatedAt||tradeStamp(t)}));
+    if(clean.length)byTrade[t.id]=clean;
+  }
+  return {app:'coinlog',version:2,trades:cleanTrades,shots:byTrade,
+    tradeTombstones:normalizeTombs(s.tradeTombstones),shotTombstones:normalizeShotTombs(s.shotTombstones)};
+}
+async function collectLocalState(){
+  const shots={};
+  for(const t of trades){
+    const arr=await getShots(t.id);
+    if(arr.length)shots[t.id]=arr;
+  }
+  return normalizeState({trades,shots,tradeTombstones,shotTombstones});
+}
+function mergeStates(localRaw,remoteRaw){
+  const a=normalizeState(localRaw),b=normalizeState(remoteRaw);
+  const tradeDeletes={...a.tradeTombstones};
+  for(const [id,ts] of Object.entries(b.tradeTombstones))tradeDeletes[id]=latestIso(tradeDeletes[id],ts);
+  const tradeMap=new Map();
+  for(const t of a.trades)tradeMap.set(t.id,t);
+  // Equal timestamps happen during the one-time v1 migration; prefer the already-synced server copy.
+  for(const t of b.trades){const old=tradeMap.get(t.id);if(!old||timeMs(tradeStamp(t))>=timeMs(tradeStamp(old)))tradeMap.set(t.id,t)}
+  const mergedTrades=[];
+  for(const t of tradeMap.values()){
+    const deletedAt=tradeDeletes[t.id];
+    if(!deletedAt||timeMs(tradeStamp(t))>timeMs(deletedAt))mergedTrades.push(t);
+  }
+
+  const shotDeletes=normalizeShotTombs(a.shotTombstones);
+  for(const [tradeId,items] of Object.entries(b.shotTombstones)){
+    if(!shotDeletes[tradeId])shotDeletes[tradeId]={};
+    for(const [id,ts] of Object.entries(items))shotDeletes[tradeId][id]=latestIso(shotDeletes[tradeId][id],ts);
+  }
+  const liveIds=new Set(mergedTrades.map(t=>t.id)),shots={};
+  for(const tradeId of liveIds){
+    const imageMap=new Map();
+    for(const shot of (a.shots[tradeId]||[]))imageMap.set(shot.id,shot);
+    for(const shot of (b.shots[tradeId]||[])){
+      const old=imageMap.get(shot.id);
+      if(!old||timeMs(shot.updatedAt)>=timeMs(old.updatedAt))imageMap.set(shot.id,shot);
+    }
+    const clean=[];
+    for(const shot of imageMap.values()){
+      const deletedAt=shotDeletes[tradeId]&&shotDeletes[tradeId][shot.id];
+      if(!deletedAt||timeMs(shot.updatedAt)>timeMs(deletedAt))clean.push(shot);
+    }
+    if(clean.length)shots[tradeId]=clean;
+  }
+  return {app:'coinlog',version:2,mergedAt:new Date().toISOString(),trades:mergedTrades,shots,
+    tradeTombstones:tradeDeletes,shotTombstones:shotDeletes};
+}
+async function persistState(raw){
+  const s=normalizeState(raw),oldIds=new Set(trades.map(t=>t.id));
+  for(const t of s.trades){
+    const arr=s.shots[t.id]||[];
+    if(arr.length)await saveShots(t.id,arr);else await idbDel(t.id);
+    try{localStorage.removeItem('shot_'+t.id)}catch(e){}
+    oldIds.delete(t.id);
+  }
+  for(const id of oldIds){await idbDel(id);try{localStorage.removeItem('shot_'+id)}catch(e){}}
+  trades=s.trades;tradeTombstones=s.tradeTombstones;shotTombstones=s.shotTombstones;
+  save();saveSyncMeta();updateFootCount();renderList();
+}
+
+function bytesToB64(bytes){
+  let s='';const step=0x8000;
+  for(let i=0;i<bytes.length;i+=step)s+=String.fromCharCode(...bytes.subarray(i,i+step));
+  return btoa(s);
+}
+function b64ToBytes(s){const bin=atob(s),out=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);return out}
+function bytesToB64Url(bytes){return bytesToB64(bytes).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+async function syncAuthToken(passphrase){
+  const raw=new TextEncoder().encode('coinlog-auth-v2\u0000'+passphrase);
+  return bytesToB64Url(new Uint8Array(await crypto.subtle.digest('SHA-256',raw)));
+}
+async function encryptionKey(passphrase,salt,iterations,usage){
+  const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(passphrase),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',hash:'SHA-256',salt,iterations},material,{name:'AES-GCM',length:256},false,[usage]);
+}
+async function encryptState(state,passphrase){
+  const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+  const key=await encryptionKey(passphrase,salt,SYNC_ITERATIONS,'encrypt');
+  const plain=new TextEncoder().encode(JSON.stringify(state));
+  const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:new TextEncoder().encode(SYNC_AAD)},key,plain);
+  return {format:'coinlog-encrypted',version:2,updatedAt:new Date().toISOString(),
+    kdf:{name:'PBKDF2',hash:'SHA-256',iterations:SYNC_ITERATIONS,salt:bytesToB64(salt)},
+    cipher:{name:'AES-GCM',iv:bytesToB64(iv)},ciphertext:bytesToB64(new Uint8Array(cipher))};
+}
+async function decryptState(envelope,passphrase){
   try{
-    const payload={app:'coinlog',version:1,trades,shots:await collectShots()};
-    const r=await fetch(c.url+'/data?key='+encodeURIComponent(c.key),{
-      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    const d=await r.json();
-    if(!r.ok||!d.ok)throw new Error(d.error||('HTTP '+r.status));
-    toast('올리기 완료 · '+trades.length+'건');
-  }catch(e){toast('올리기 실패: '+e.message)}
+    if(!envelope||envelope.format!=='coinlog-encrypted'||envelope.version!==2)throw new Error('암호화 형식이 아닙니다');
+    const iterations=Number(envelope.kdf&&envelope.kdf.iterations);
+    if(iterations<100000||iterations>1000000)throw new Error('암호화 설정이 올바르지 않습니다');
+    const salt=b64ToBytes(envelope.kdf.salt),iv=b64ToBytes(envelope.cipher.iv);
+    const key=await encryptionKey(passphrase,salt,iterations,'decrypt');
+    const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv,additionalData:new TextEncoder().encode(SYNC_AAD)},key,b64ToBytes(envelope.ciphertext));
+    return normalizeState(JSON.parse(new TextDecoder().decode(plain)));
+  }catch(e){throw new Error('비밀키가 다르거나 서버 데이터가 손상됐어요')}
+}
+async function workerRequest(c,method,body,path='/data'){
+  const token=await syncAuthToken(c.key);
+  const options={method,headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'}};
+  if(body!==undefined)options.body=JSON.stringify(body);
+  let r;
+  try{r=await fetch(c.url+path,options)}catch(e){throw new Error('동기화 서버에 연결할 수 없어요')}
+  let d={};try{d=await r.json()}catch(e){}
+  if(r.status===401)throw new Error('비밀키가 서버에 등록된 키와 달라요');
+  if(!r.ok||!d.ok){const err=new Error(d.error||('서버 오류 '+r.status));err.status=r.status;throw err}
+  return d;
+}
+async function runSync(c){
+  let local=await collectLocalState();
+  for(let attempt=0;attempt<2;attempt++){
+    const remoteReply=await workerRequest(c,'GET');
+    const remote=(remoteReply.empty||!remoteReply.data)?normalizeState({}):await decryptState(remoteReply.data,c.key);
+    const merged=mergeStates(local,remote);
+    const encrypted=await encryptState(merged,c.key);
+    try{
+      await workerRequest(c,'POST',{data:encrypted,baseRevision:remoteReply.revision||null});
+      await persistState(merged);
+      local=merged;
+      localStorage.setItem('coinLastSyncAt',new Date().toISOString());
+      return merged;
+    }catch(e){if(e.status===409&&attempt===0){local=merged;continue}throw e}
+  }
+  throw new Error('다른 기기와 동시에 변경됐어요. 다시 눌러주세요');
+}
+
+document.getElementById('sync-now').onclick=async()=>{
+  if(!syncReady()){toast('먼저 동기화 설정에서 서버 주소와 비밀키를 입력하세요');return}
+  const b=document.getElementById('sync-now'),c=syncCfg();
+  b.disabled=true;b.textContent='동기화 중…';toast('기록을 안전하게 합치는 중…');
+  try{const merged=await runSync(c);toast('동기화 완료 · '+merged.trades.length+'건')}
+  catch(e){toast('동기화 실패: '+e.message)}
+  finally{b.disabled=false;b.textContent='↻ 동기화'}
 };
-document.getElementById('sync-down').onclick=async()=>{
-  if(!syncReady()){toast('먼저 동기화 설정을 해주세요');return}
+
+document.getElementById('sync-key-change').onclick=async()=>{
+  if(!syncReady()){toast('먼저 현재 비밀키로 동기화 설정을 해주세요');return}
   const c=syncCfg();
-  toast('내려받는 중…');
+  const next=prompt('새 비밀키 (12자 이상, 16자 이상 권장)\n\n현재 기록을 새 키로 다시 암호화합니다.','');
+  if(next===null)return;
+  const nextKey=next.trim();
+  if(nextKey.length<12){toast('새 비밀키는 12자 이상이어야 해요');return}
+  if(nextKey===c.key){toast('현재 비밀키와 다른 키를 입력하세요');return}
+  const again=prompt('확인을 위해 새 비밀키를 한 번 더 입력하세요.','');
+  if(again===null)return;
+  if(again.trim()!==nextKey){toast('두 비밀키가 서로 달라요');return}
+  const b=document.getElementById('sync-key-change');b.disabled=true;b.textContent='변경 중…';
   try{
-    const r=await fetch(c.url+'/data?key='+encodeURIComponent(c.key));
-    const d=await r.json();
-    if(!r.ok||!d.ok)throw new Error(d.error||('HTTP '+r.status));
-    if(d.empty||!d.data){toast('서버에 저장된 기록이 없어요');return}
-    const incoming=d.data.trades||[];
-    if(!confirm('서버 기록 '+incoming.length+'건을 내려받습니다.\n\n이 기기의 현재 '+trades.length+'건은 덮어써져요. 계속할까요?'))return;
-    trades=incoming;save();
-    if(d.data.shots){for(const [id,arr] of Object.entries(d.data.shots)){try{await saveShots(id,arr)}catch(err){}}}
-    updateFootCount();renderList();
-    toast('내려받기 완료 · '+trades.length+'건');
-  }catch(e){toast('내려받기 실패: '+e.message)}
+    const remoteReply=await workerRequest(c,'GET');
+    if(remoteReply.empty||!remoteReply.data)throw new Error('먼저 현재 비밀키로 동기화를 한 번 완료하세요');
+    const remote=await decryptState(remoteReply.data,c.key);
+    const merged=mergeStates(await collectLocalState(),remote);
+    const encrypted=await encryptState(merged,nextKey);
+    const newAuthToken=await syncAuthToken(nextKey);
+    await workerRequest(c,'POST',{data:encrypted,baseRevision:remoteReply.revision||null,newAuthToken},'/rotate');
+    await persistState(merged);
+    sessionStorage.setItem('coinSyncKey_v2',nextKey);updateSyncUI();
+    toast('비밀키 변경 완료 · 다른 기기에도 새 키를 입력하세요');
+  }catch(e){toast('비밀키 변경 실패: '+e.message)}
+  finally{b.disabled=false;b.textContent='비밀키 변경'}
 };
 
 /* ---------- init ---------- */
