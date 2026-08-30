@@ -633,7 +633,7 @@ document.getElementById('btn-save').onclick=()=>{
   };
   if(editId){trades=trades.map(x=>x.id===editId?t:x);delete tradeTombstones[editId];toast('수정 완료')}
   else{trades.unshift(t);toast(quickMode?'추가됨 · 다음 건 입력':'기록 저장됨 — 잘했다')}
-  save();saveSyncMeta();
+  save();saveSyncMeta();scheduleAutoSync('trade-save');
   if(quickMode&&!editId)quickReset();else resetForm();
 };
 document.getElementById('btn-reset').onclick=resetForm;
@@ -675,7 +675,7 @@ document.getElementById('bulk-add').onclick=()=>{
     trades.unshift({id:uid(),symbol:p[0].toUpperCase(),dir,entry,exit,stop:null,lev:null,pnl:+g.toFixed(2),r:null,tf,date:now,exitDate:null,setup:[],emo:[],mistake:[],plan:null,thesis:'',lesson:'',createdAt:now,updatedAt:now});
     added++;
   });
-  if(added){save();document.getElementById('bulk-text').value='';toast(added+'건 추가됨'+(fail?' · '+fail+'건 형식오류':''))}
+  if(added){save();scheduleAutoSync('bulk-add');document.getElementById('bulk-text').value='';toast(added+'건 추가됨'+(fail?' · '+fail+'건 형식오류':''))}
   else toast('추가 실패 — 형식 확인 ('+fail+'건)');
 };
 
@@ -776,7 +776,7 @@ function editTrade(id){
 function delTrade(id){
   if(!confirm('이 기록을 삭제할까요?'))return;
   tradeTombstones[id]=new Date().toISOString();
-  trades=trades.filter(x=>x.id!==id);delShot(id);save();saveSyncMeta();renderList();toast('삭제됨');
+  trades=trades.filter(x=>x.id!==id);delShot(id);save();saveSyncMeta();renderList();scheduleAutoSync('trade-delete');toast('삭제됨');
 }
 
 /* ---------- list ---------- */
@@ -1282,6 +1282,7 @@ async function addShot(id,data){
   if(shotTombstones[id])delete shotTombstones[id][imgId];
   await saveShots(id,arr);saveSyncMeta();
   try{localStorage.removeItem('shot_'+id)}catch(e){}
+  scheduleAutoSync('shot-add');
 }
 function delShot(id){idbDel(id);try{localStorage.removeItem('shot_'+id)}catch(e){}}
 function scaleCanvas(img,maxW){
@@ -1535,7 +1536,7 @@ function handleShotFile(file,id){
         const lo=scaleCanvas(img,1100).toDataURL('image/jpeg',0.72);
         try{
           const arr=await getShots(id);arr.push({id:uid(),data:lo,updatedAt:new Date().toISOString()});
-          localStorage.setItem('shot_'+id,JSON.stringify(arr));renderShot(id);toast('스크린샷 저장됨')
+          localStorage.setItem('shot_'+id,JSON.stringify(arr));renderShot(id);scheduleAutoSync('shot-add-fallback');toast('스크린샷 저장됨')
         }
         catch(e2){toast('저장 공간 부족 — 오래된 스크린샷을 지워보세요')}
       }
@@ -1552,7 +1553,7 @@ async function removeShot(id,imgId){
   shotTombstones[id][imgId]=new Date().toISOString();
   if(arr.length){try{await saveShots(id,arr)}catch(e){}}else await idbDel(id);
   try{localStorage.removeItem('shot_'+id)}catch(e){}
-  saveSyncMeta();renderShot(id);
+  saveSyncMeta();renderShot(id);scheduleAutoSync('shot-delete');
 }
 function lightbox(src){
   const d=document.createElement('div');d.className='lightbox';
@@ -1612,6 +1613,7 @@ document.getElementById('import-file').onchange=e=>{
         }
       }
       updateFootCount();renderList();
+      scheduleAutoSync('backup-import');
       toast('가져오기 완료 · 총 '+trades.length+'건');
     }catch(err){toast('가져오기 실패: '+err.message)}
   };
@@ -1624,12 +1626,17 @@ const SYNC_AAD='coinlog-sync-v2';
 const SYNC_ITERATIONS=210000;
 
 function syncCfg(){
-  return {url:localStorage.getItem('coinSyncUrl')||'',key:sessionStorage.getItem('coinSyncKey_v2')||''};
+  let key=localStorage.getItem('coinSyncKey_v2')||'';
+  if(!key){
+    key=sessionStorage.getItem('coinSyncKey_v2')||'';
+    if(key)localStorage.setItem('coinSyncKey_v2',key);
+  }
+  return {url:localStorage.getItem('coinSyncUrl')||'',key};
 }
 function syncReady(){const c=syncCfg();return !!c.url&&c.key.length>=12}
 function updateSyncUI(){
   const b=document.getElementById('sync-setup');
-  if(b)b.textContent=syncReady()?'동기화 설정 ✓':'동기화 설정';
+  if(b)b.textContent=syncReady()?'자동 동기화 ✓':'동기화 설정';
 }
 try{localStorage.removeItem('coinSyncKey')}catch(e){}
 
@@ -1638,17 +1645,17 @@ document.getElementById('sync-setup').onclick=()=>{
   const url=prompt('동기화 서버 주소 (Cloudflare Worker)\n예: https://coinlog-sync.내계정.workers.dev\n\n비우면 이 기기의 동기화를 끕니다.',c.url);
   if(url===null)return;
   if(!url.trim()){
-    localStorage.removeItem('coinSyncUrl');sessionStorage.removeItem('coinSyncKey_v2');
+    localStorage.removeItem('coinSyncUrl');localStorage.removeItem('coinSyncKey_v2');sessionStorage.removeItem('coinSyncKey_v2');
     updateSyncUI();toast('이 기기의 동기화를 껐어요');return;
   }
-  const key=prompt('새 비밀키 (12자 이상, 16자 이상 권장)\n\nPC와 폰에 한 글자도 다르지 않게 입력하세요.\n서버로 원문 비밀키는 보내지 않으며, 브라우저를 닫으면 이 기기에서 지워집니다.\n\n이미 입력한 키를 유지하려면 비워 두세요.','');
+  const key=prompt('비밀키 (12자 이상, 16자 이상 권장)\n\nPC와 폰에 한 글자도 다르지 않게 입력하세요.\n완전 자동 동기화를 위해 이 기기에 기억됩니다.\n\n이미 입력한 키를 유지하려면 비워 두세요.','');
   if(key===null)return;
   const nextKey=key.trim()||c.key;
   if(nextKey.length<12){toast('비밀키는 12자 이상이어야 해요');return}
   if(!window.crypto||!crypto.subtle){toast('이 브라우저는 암호화를 지원하지 않아요');return}
   localStorage.setItem('coinSyncUrl',url.trim().replace(/\/+$/,''));
-  sessionStorage.setItem('coinSyncKey_v2',nextKey);
-  updateSyncUI();toast('동기화 설정 완료');
+  localStorage.setItem('coinSyncKey_v2',nextKey);sessionStorage.removeItem('coinSyncKey_v2');
+  updateSyncUI();scheduleAutoSync('setup',200);toast('자동 동기화 설정 완료');
 };
 
 function timeMs(v){const n=Date.parse(v||'');return Number.isFinite(n)?n:0}
@@ -1807,14 +1814,42 @@ async function runSync(c){
   throw new Error('다른 기기와 동시에 변경됐어요. 다시 눌러주세요');
 }
 
-document.getElementById('sync-now').onclick=async()=>{
-  if(!syncReady()){toast('먼저 동기화 설정에서 서버 주소와 비밀키를 입력하세요');return}
+let syncRunning=false,syncQueued=false,autoSyncTimer=null;
+function scheduleAutoSync(reason,delay=900){
+  if(!syncReady()||navigator.onLine===false)return;
+  if(autoSyncTimer)clearTimeout(autoSyncTimer);
+  autoSyncTimer=setTimeout(()=>{autoSyncTimer=null;performSync(false)},delay);
+}
+async function performSync(manual){
+  if(manual&&autoSyncTimer){clearTimeout(autoSyncTimer);autoSyncTimer=null}
+  if(!syncReady()){
+    if(manual)toast('먼저 동기화 설정에서 서버 주소와 비밀키를 입력하세요');
+    return;
+  }
+  if(navigator.onLine===false){if(manual)toast('인터넷 연결을 확인하세요');return}
+  if(syncRunning){syncQueued=true;return}
+  syncRunning=true;
   const b=document.getElementById('sync-now'),c=syncCfg();
-  b.disabled=true;b.textContent='동기화 중…';toast('기록을 안전하게 합치는 중…');
-  try{const merged=await runSync(c);toast('동기화 완료 · '+merged.trades.length+'건')}
-  catch(e){toast('동기화 실패: '+e.message)}
-  finally{b.disabled=false;b.textContent='↻ 동기화'}
-};
+  b.disabled=true;b.textContent=manual?'동기화 중…':'자동 동기화 중…';
+  if(manual)toast('기록을 안전하게 합치는 중…');
+  try{
+    const merged=await runSync(c);
+    if(manual)toast('동기화 완료 · '+merged.trades.length+'건');
+  }catch(e){toast((manual?'동기화':'자동 동기화')+' 실패: '+e.message)}
+  finally{
+    syncRunning=false;b.disabled=false;b.textContent='↻ 동기화';
+    if(syncQueued){syncQueued=false;scheduleAutoSync('queued',250)}
+  }
+}
+document.getElementById('sync-now').onclick=()=>performSync(true);
+
+function syncWhenReturning(){
+  const last=timeMs(localStorage.getItem('coinLastSyncAt'));
+  if(!last||Date.now()-last>15000)scheduleAutoSync('return',300);
+}
+window.addEventListener('online',()=>scheduleAutoSync('online',250));
+window.addEventListener('focus',syncWhenReturning);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncWhenReturning()});
 
 document.getElementById('sync-key-change').onclick=async()=>{
   if(!syncReady()){toast('먼저 현재 비밀키로 동기화 설정을 해주세요');return}
@@ -1837,7 +1872,7 @@ document.getElementById('sync-key-change').onclick=async()=>{
     const newAuthToken=await syncAuthToken(nextKey);
     await workerRequest(c,'POST',{data:encrypted,baseRevision:remoteReply.revision||null,newAuthToken},'/rotate');
     await persistState(merged);
-    sessionStorage.setItem('coinSyncKey_v2',nextKey);updateSyncUI();
+    localStorage.setItem('coinSyncKey_v2',nextKey);sessionStorage.removeItem('coinSyncKey_v2');updateSyncUI();
     toast('비밀키 변경 완료 · 다른 기기에도 새 키를 입력하세요');
   }catch(e){toast('비밀키 변경 실패: '+e.message)}
   finally{b.disabled=false;b.textContent='비밀키 변경'}
@@ -1849,6 +1884,7 @@ setMode('deep');
 updateFootCount();
 updateSyncUI();
 resetForm();
+scheduleAutoSync('app-open',500);
 </script>
 </body>
 </html>
