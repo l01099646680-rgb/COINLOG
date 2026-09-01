@@ -136,19 +136,6 @@
   .sample-note{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:8px;padding:11px 14px;margin-bottom:18px;font-size:12.5px;color:var(--muted);line-height:1.6}
   .sample-note b{color:var(--ink)}
 
-  .diag{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:22px}
-  .diag-head{font-size:10.5px;font-weight:700;letter-spacing:1.6px;color:var(--gold);text-transform:uppercase;margin-bottom:14px}
-  .diag-head span{color:var(--faint);font-weight:400;letter-spacing:.3px;text-transform:none;margin-left:8px;font-size:11px}
-  .diag-item{position:relative;padding:10px 0 10px 16px;font-size:13.5px;line-height:1.75;color:#c7c9cf;border-bottom:1px solid var(--line)}
-  .diag-item:last-child{border-bottom:none;padding-bottom:0}
-  .diag-item:first-of-type{padding-top:0}
-  .diag-item b{color:var(--ink);font-weight:700}
-  .diag-item::before{content:'';position:absolute;left:0;top:16px;width:5px;height:5px;border-radius:50%}
-  .diag-item:first-of-type::before{top:6px}
-  .diag-item.bad::before{background:var(--red)}
-  .diag-item.good::before{background:var(--jade)}
-  .diag-item.info::before{background:var(--faint)}
-
   /* ---------- trade list ---------- */
   .filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;align-items:center}
   .filters select,.filters input{padding:8px 11px;font-size:13px}
@@ -296,7 +283,7 @@
     .stat-grid{gap:8px;margin-bottom:16px}
     .stat{padding:13px;min-width:0}
     .stat .v{font-size:21px;overflow-wrap:anywhere}
-    .chart-card,.bd,.diag{padding:15px}
+    .chart-card,.bd{padding:15px}
     .bd table{min-width:480px}
     .chart-scroll svg{width:680px;max-width:none}
     .eq-toggle{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
@@ -1065,129 +1052,6 @@ function renderList(){
 ['flt-search','flt-dir','flt-result','flt-emo'].forEach(id=>document.getElementById(id).addEventListener('input',renderList));
 
 /* ---------- stats ---------- */
-/* ---------- rule-based diagnostics ---------- */
-function diagnostics(){
-  const out=[]; // {tone:'bad'|'good'|'info', text}
-  const n=trades.length;
-  if(n<5)return out;
-  const chg=t=>priceChg(t);
-  const winRate=arr=>{const w=arr.filter(t=>chg(t)>0).length,l=arr.filter(t=>chg(t)<0).length,d=w+l;return d?w/d*100:null};
-  const avgOf=arr=>arr.length?arr.reduce((a,t)=>a+chg(t),0)/arr.length:0;
-  const MIN=4; // min sample before making a claim
-
-  // 1. emotion contrast
-  const emoMap={};
-  trades.forEach(t=>t.emo.forEach(e=>{(emoMap[e]=emoMap[e]||[]).push(t)}));
-  const RISKY=['조급','FOMO','복수심','욕심'],CALM=['차분','확신'];
-  const riskyT=trades.filter(t=>t.emo.some(e=>RISKY.includes(e)));
-  const calmT=trades.filter(t=>t.emo.some(e=>CALM.includes(e)));
-  if(riskyT.length>=MIN&&calmT.length>=MIN){
-    const rA=avgOf(riskyT),cA=avgOf(calmT);
-    if(cA-rA>0.15){
-      out.push({tone:'bad',text:'<b>감정이 성과를 가르고 있어요.</b> 조급·FOMO·복수심·욕심 상태의 '+riskyT.length+'건은 평균 '+fmt(rA,2)+'%인데, 차분·확신 상태의 '+calmT.length+'건은 '+fmt(cA,2)+'%예요. 진입 직전에 지금 어느 쪽인지 한 번만 확인해도 상당 부분 걸러질 거예요.'});
-    }else if(rA>=cA){
-      out.push({tone:'info',text:'위험 감정('+riskyT.length+'건, '+fmt(rA,2)+'%)과 차분한 상태('+calmT.length+'건, '+fmt(cA,2)+'%)의 성과 차이가 크지 않아요. 감정보다 다른 요인이 결과를 가르고 있을 수 있어요.'});
-    }
-  }
-  const emoRows=Object.entries(emoMap).filter(([k,a])=>a.length>=MIN).map(([k,a])=>({k,n:a.length,avg:avgOf(a),wr:winRate(a)}));
-  if(emoRows.length>=2){
-    const worst=emoRows.slice().sort((a,b)=>a.avg-b.avg)[0];
-    if(worst.avg<0)out.push({tone:'bad',text:'<b>"'+esc(worst.k)+'"</b> 상태의 매매 '+worst.n+'건은 평균 '+fmt(worst.avg,2)+'%'+(worst.wr!=null?' · 승률 '+worst.wr.toFixed(0)+'%':'')+'로 가장 나빠요. 이 감정이 올라오면 진입을 한 템포 미루는 게 이득이에요.'});
-  }
-
-  // 2. plan adherence
-  const py=trades.filter(t=>t.plan==='yes'),pn=trades.filter(t=>t.plan==='no');
-  if(py.length>=MIN&&pn.length>=MIN){
-    const yA=avgOf(py),nA=avgOf(pn),yW=winRate(py),nW=winRate(pn);
-    if(yA>nA){
-      out.push({tone:'bad',text:'<b>계획 이탈의 비용이 숫자로 보여요.</b> 계획을 지킨 '+py.length+'건은 평균 '+fmt(yA,2)+'%'+(yW!=null?'(승률 '+yW.toFixed(0)+'%)':'')+', 이탈한 '+pn.length+'건은 '+fmt(nA,2)+'%'+(nW!=null?'(승률 '+nW.toFixed(0)+'%)':'')+'예요.'});
-    }
-  }
-
-  // 3. mistake tags
-  const misMap={};
-  trades.forEach(t=>t.mistake.forEach(m=>{(misMap[m]=misMap[m]||[]).push(t)}));
-  const misRows=Object.entries(misMap).map(([k,a])=>({k,n:a.length,avg:avgOf(a)})).sort((a,b)=>b.n-a.n);
-  if(misRows.length&&misRows[0].n>=3){
-    const top=misRows[0];
-    out.push({tone:'bad',text:'가장 잦은 실수는 <b>"'+esc(top.k)+'"</b>예요 — '+top.n+'건(전체의 '+(top.n/n*100).toFixed(0)+'%), 평균 '+fmt(top.avg,2)+'%. 하나만 고른다면 이것부터 줄이는 게 효율이 제일 좋아요.'});
-  }
-
-  // 4. R expectancy / payoff structure
-  const rVals=trades.map(getR).filter(v=>v!=null);
-  if(rVals.length>=MIN){
-    const rW=rVals.filter(v=>v>0),rL=rVals.filter(v=>v<0);
-    const exp=rVals.reduce((a,v)=>a+v,0)/rVals.length;
-    const aw=rW.length?rW.reduce((a,v)=>a+v,0)/rW.length:0;
-    const al=rL.length?Math.abs(rL.reduce((a,v)=>a+v,0)/rL.length):0;
-    const rwr=(rW.length+rL.length)?rW.length/(rW.length+rL.length)*100:0;
-    if(exp>0){
-      out.push({tone:'good',text:'<b>기대값이 플러스예요 (건당 '+fmt(exp,2)+'R).</b> R 기록 '+rVals.length+'건 기준 승률 '+rwr.toFixed(0)+'%, 평균 익절 '+fmt(aw,2)+'R / 평균 손절 -'+al.toFixed(2)+'R. 이 구조를 유지하는 게 맞는 방향이에요.'});
-    }else{
-      const need=(aw+al)>0?(al/(aw+al)*100):0;
-      out.push({tone:'bad',text:'<b>기대값이 마이너스예요 (건당 '+fmt(exp,2)+'R).</b> 지금 손익비(익절 '+fmt(aw,2)+'R / 손절 -'+al.toFixed(2)+'R)면 승률이 최소 '+need.toFixed(0)+'%는 나와야 본전인데 현재는 '+rwr.toFixed(0)+'%예요. 익절을 조금 더 끌거나 손절을 좁히는 쪽을 봐야 해요.'});
-    }
-    if(rW.length>=3&&rL.length>=3&&aw<al*0.8){
-      out.push({tone:'bad',text:'<b>먹을 땐 조금, 잃을 땐 크게</b> 패턴이 보여요. 평균 익절 '+fmt(aw,2)+'R인데 평균 손절은 -'+al.toFixed(2)+'R이에요. 조기익절을 의심해볼 만해요.'});
-    }
-  }
-
-  // 5. major vs alt
-  const isMaj=s=>['BTC','ETH'].includes((s||'').toUpperCase());
-  const maj=trades.filter(t=>isMaj(t.symbol)),alt=trades.filter(t=>!isMaj(t.symbol));
-  if(maj.length>=MIN&&alt.length>=MIN){
-    const mC=maj.reduce((a,t)=>a+chg(t),0),aC=alt.reduce((a,t)=>a+chg(t),0);
-    const mW=winRate(maj),aW=winRate(alt);
-    if(mC>0&&aC<0){
-      out.push({tone:'bad',text:'<b>메이저는 벌고 알트에서 새고 있어요.</b> BTC·ETH '+maj.length+'건은 변화율 합계 '+fmt(mC,1)+'%'+(mW!=null?'(승률 '+mW.toFixed(0)+'%)':'')+', 알트 '+alt.length+'건은 '+fmt(aC,1)+'%'+(aW!=null?'(승률 '+aW.toFixed(0)+'%)':'')+'. 알트 사이즈를 줄이는 것만으로 곡선이 달라질 수 있어요.'});
-    }else if(aC>0&&mC<0){
-      out.push({tone:'info',text:'알트 '+alt.length+'건의 변화율 합계가 '+fmt(aC,1)+'%로 메이저('+fmt(mC,1)+'%)보다 좋아요. 변동성이 큰 만큼 사이즈 관리만 유지되면 강점일 수 있어요.'});
-    }
-  }
-
-  // 6. setup extremes
-  const setMap={};
-  trades.forEach(t=>t.setup.forEach(s=>{(setMap[s]=setMap[s]||[]).push(t)}));
-  const setRows=Object.entries(setMap).filter(([k,a])=>a.length>=MIN).map(([k,a])=>({k,n:a.length,avg:avgOf(a)}));
-  if(setRows.length>=2){
-    const sorted=setRows.slice().sort((a,b)=>b.avg-a.avg);
-    const best=sorted[0],worst=sorted[sorted.length-1];
-    if(best.avg>0&&worst.avg<0){
-      out.push({tone:'info',text:'셋업별로 갈려요 — <b>'+esc(best.k)+'</b>는 '+best.n+'건 평균 '+fmt(best.avg,2)+'%로 가장 좋고, <b>'+esc(worst.k)+'</b>는 '+worst.n+'건 평균 '+fmt(worst.avg,2)+'%예요. 잘 되는 셋업에 집중하는 것도 전략이에요.'});
-    }
-  }
-
-  // 7. recent trend
-  if(n>=20){
-    const sorted=[...trades].sort((a,b)=>new Date(a.date)-new Date(b.date));
-    const half=Math.floor(sorted.length/2);
-    const early=sorted.slice(0,half),recent=sorted.slice(half);
-    const eA=avgOf(early),rA2=avgOf(recent);
-    if(rA2<eA-0.15){
-      out.push({tone:'bad',text:'<b>최근 흐름이 나빠지고 있어요.</b> 앞선 '+early.length+'건 평균 '+fmt(eA,2)+'% → 최근 '+recent.length+'건 '+fmt(rA2,2)+'%. 매매 수를 줄이고 셋업을 좁힐 타이밍일 수 있어요.'});
-    }else if(rA2>eA+0.15){
-      out.push({tone:'good',text:'<b>최근 흐름이 좋아지고 있어요.</b> 앞선 '+early.length+'건 평균 '+fmt(eA,2)+'% → 최근 '+recent.length+'건 '+fmt(rA2,2)+'%. 뭘 바꿨는지 기억해두면 재현할 수 있어요.'});
-    }
-  }
-
-  // 8. record hygiene
-  const noValidR=trades.filter(t=>getR(t)==null).length;
-  if(n>=10&&noValidR/n>0.5){
-    out.push({tone:'info',text:'전체 '+n+'건 중 '+noValidR+'건은 유효한 손절가가 없어 R 통계에서 제외돼요. 손절가를 채우면 분석이 훨씬 정확해져요.'});
-  }
-  return out;
-}
-function diagnosticsHtml(){
-  const d=diagnostics();
-  if(!d.length){
-    return '<div class="diag"><div class="diag-head">진단</div><div class="diag-item info">'+
-      (trades.length<5?'기록이 5건 이상 쌓이면 패턴 진단을 시작할게요. 지금은 '+trades.length+'건이에요.'
-        :'아직 뚜렷하게 갈리는 패턴이 안 보여요. 감정·계획 준수·실수 태그를 채우면 더 날카로운 진단이 나와요.')+'</div></div>';
-  }
-  return '<div class="diag"><div class="diag-head">진단 <span>기록 '+trades.length+'건에서 찾은 패턴</span></div>'+
-    d.map(x=>'<div class="diag-item '+x.tone+'">'+x.text+'</div>').join('')+'</div>';
-}
-
 function renderStats(){
   const body=document.getElementById('stats-body');
   if(!trades.length){
@@ -1216,7 +1080,6 @@ function renderStats(){
     stat('평균 변화율',fmt(avg,2)+'<small>%</small>',avg>=0?'win':'loss')+
     '</div>';
 
-  html+=diagnosticsHtml();
   html+=majorAltTable();
 
   const realTrades=trades.filter(t=>realizedValue(t)!=null);
