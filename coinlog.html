@@ -118,7 +118,8 @@
   .btn-primary:hover{filter:brightness(1.07)}
   .btn-ghost{background:none;border:1px solid var(--line2);color:var(--muted);padding:12px 18px;border-radius:8px;font-weight:600;font-size:13px}
   .btn-ghost:hover{color:var(--ink);border-color:var(--faint)}
-  .edit-note{color:var(--gold);font-size:12px;font-weight:600;margin-left:auto}
+  .edit-note{color:var(--gold);font-size:12px;font-weight:600}
+  .draft-note{color:var(--faint);font-size:11.5px;margin-left:auto}
 
   .mode-row{display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap}
   .mode-toggle{width:240px}
@@ -222,10 +223,11 @@
   .chart-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px;margin-bottom:22px}
   .eq-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap}
   .eq-toggle{display:flex;gap:4px}
+  .chart-scroll{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
   .chart-card svg{width:100%;height:auto;display:block}
 
   .breakdowns{display:grid;grid-template-columns:1fr 1fr;gap:18px}
-  .bd{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px}
+  .bd{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;overflow-x:auto;-webkit-overflow-scrolling:touch}
   .bd table{width:100%;border-collapse:collapse;font-size:13px}
   .bd th{text-align:left;color:var(--faint);font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;padding-bottom:9px;border-bottom:1px solid var(--line)}
   .bd th.r,.bd td.r{text-align:right;font-family:var(--mono)}
@@ -240,6 +242,9 @@
 
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--gold);color:#1a1300;font-weight:700;font-size:13.5px;padding:12px 22px;border-radius:8px;opacity:0;pointer-events:none;transition:.25s;z-index:50}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .undo-toast{position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(20px);display:flex;align-items:center;gap:16px;background:var(--panel2);border:1px solid var(--gold);box-shadow:0 10px 30px rgba(0,0,0,.35);color:var(--ink);font-size:13.5px;font-weight:700;padding:11px 13px 11px 18px;border-radius:9px;opacity:0;pointer-events:none;transition:.25s;z-index:51;white-space:nowrap}
+  .undo-toast.show{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0)}
+  .undo-toast button{border:0;border-radius:6px;background:var(--gold);color:#1a1300;font-size:12.5px;font-weight:800;padding:8px 12px}
 
   .app-foot{max-width:1400px;margin:34px auto 0;padding:16px 24px 30px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--faint)}
   .foot-main{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
@@ -278,6 +283,26 @@
     .breakdowns{grid-template-columns:1fr}
     main{padding:22px 16px 0}
     header{padding:18px 16px 0}
+    .card{padding:16px}
+    .actions{flex-wrap:wrap}
+    .draft-note{width:100%;margin-left:0}
+    .filters input[type=text]{flex:1 1 100%;width:100%}
+    .filters select{flex:1 1 calc(50% - 5px);min-width:0}
+    .count-tag{width:100%;margin-left:0;text-align:right}
+    .trade{padding:14px}
+    .trade-foot{flex-wrap:wrap;gap:6px 14px}
+    .trade-foot .link{padding:6px 2px}
+    .tf-row{flex-wrap:wrap}
+    .stat-grid{gap:8px;margin-bottom:16px}
+    .stat{padding:13px;min-width:0}
+    .stat .v{font-size:21px;overflow-wrap:anywhere}
+    .chart-card,.bd,.diag{padding:15px}
+    .bd table{min-width:480px}
+    .chart-scroll svg{width:680px;max-width:none}
+    .eq-toggle{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+    .eq-toggle .tf-btn{white-space:nowrap}
+    input[type=text],input[type=number],input[type=date],select,textarea{font-size:16px}
+    .undo-toast{width:calc(100% - 32px);justify-content:space-between;white-space:normal}
   }
 </style>
 </head>
@@ -455,6 +480,7 @@
         <button class="btn-primary" id="btn-save">기록 저장</button>
         <button class="btn-ghost" id="btn-reset">초기화</button>
         <span class="edit-note" id="edit-note" style="display:none">수정 중</span>
+        <span class="draft-note" id="draft-note"></span>
       </div>
 
       <div class="bulk">
@@ -508,6 +534,10 @@ SOL s 150.2 149.1"></textarea>
 </footer>
 
 <div class="toast" id="toast"></div>
+<div class="undo-toast" id="delete-undo" role="status" aria-live="polite">
+  <span id="delete-undo-text">거래가 삭제됐습니다</span>
+  <button type="button" id="delete-undo-btn">되돌리기</button>
+</div>
 
 <div class="import-modal" id="import-modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
   <div class="import-dialog">
@@ -531,6 +561,7 @@ SOL s 150.2 149.1"></textarea>
 
 <script>
 const KEY='coinReviewLog_v1';
+const DRAFT_KEY='coinTradeDraft_v1';
 const TRADE_TOMB_KEY='coinTradeTombstones_v2';
 const SHOT_TOMB_KEY='coinShotTombstones_v2';
 let trades=load();
@@ -543,7 +574,12 @@ const C={bg:'#13151b',panel2:'#21252f',line:'#2b303c',line2:'#373d4b',ink:'#e9e7
 
 const sel={setup:new Set(),emo:new Set(),mistake:new Set(),dir:'long',plan:null};
 
-function load(){try{return JSON.parse(localStorage.getItem(KEY))||[]}catch(e){return[]}}
+function load(){
+  try{
+    const parsed=JSON.parse(localStorage.getItem(KEY));
+    return normalizeState({trades:Array.isArray(parsed)?parsed:[]}).trades;
+  }catch(e){return[]}
+}
 function loadObj(key){try{const v=JSON.parse(localStorage.getItem(key));return v&&typeof v==='object'&&!Array.isArray(v)?v:{}}catch(e){return{}}}
 function save(){localStorage.setItem(KEY,JSON.stringify(trades));const e=document.getElementById('foot-count');if(e)e.textContent=trades.length}
 function saveSyncMeta(){
@@ -645,7 +681,7 @@ document.getElementById('btn-calc').onclick=()=>{
   const p=computePnl();
   if(p===null){toast('진입가·청산가를 먼저 입력하세요');return}
   document.getElementById('f-pnl').value=p.toFixed(2);
-  refreshCalc();
+  refreshCalc();scheduleDraftSave();
 };
 
 /* ---------- save ---------- */
@@ -660,8 +696,9 @@ document.getElementById('btn-save').onclick=()=>{
   const dt=buildISO('f-date-d','f-date-t');
   const now=new Date().toISOString();
   const previous=editId?trades.find(x=>x.id===editId):null;
+  const editing=!!previous;
   const t={
-    id:editId||uid(),
+    id:editing?editId:uid(),
     symbol,
     dir:sel.dir,
     entry:parseFloat(document.getElementById('f-entry').value)||null,
@@ -683,12 +720,12 @@ document.getElementById('btn-save').onclick=()=>{
     createdAt:previous&&previous.createdAt?previous.createdAt:now,
     updatedAt:now,
   };
-  if(editId){trades=trades.map(x=>x.id===editId?t:x);delete tradeTombstones[editId];toast('수정 완료')}
+  if(editing){trades=trades.map(x=>x.id===editId?t:x);delete tradeTombstones[editId];toast('수정 완료')}
   else{trades.unshift(t);toast(quickMode?'추가됨 · 다음 건 입력':'기록 저장됨 — 잘했다')}
-  save();saveSyncMeta();scheduleAutoSync('trade-save');
-  if(quickMode&&!editId)quickReset();else resetForm();
+  save();saveSyncMeta();clearDraft();scheduleAutoSync('trade-save');
+  if(quickMode&&!editing)quickReset();else resetForm();
 };
-document.getElementById('btn-reset').onclick=resetForm;
+document.getElementById('btn-reset').onclick=()=>{clearDraft();resetForm();toast('입력 내용 초기화됨')};
 
 /* ---------- record modes ---------- */
 let quickMode=false;
@@ -705,6 +742,64 @@ function quickReset(){
   setNow();
   const e=document.getElementById('f-entry');if(e)e.focus();
 }
+
+/* ---------- local form draft ---------- */
+const DRAFT_FIELDS=['f-symbol','f-entry','f-exit','f-stop','f-lev','f-pnl','f-realized','f-tf','f-date-d','f-date-t','f-exitdate-d','f-exitdate-t','f-thesis','f-lesson'];
+let draftTimer=null,draftPaused=false;
+function draftClock(iso){
+  const d=new Date(iso);if(isNaN(d))return '';
+  return pad2(d.getHours())+':'+pad2(d.getMinutes());
+}
+function setDraftNote(text){const e=document.getElementById('draft-note');if(e)e.textContent=text||''}
+function draftData(){
+  const fields={};DRAFT_FIELDS.forEach(id=>fields[id]=document.getElementById(id).value);
+  return {version:1,savedAt:new Date().toISOString(),editId:editId||null,mode:quickMode?'quick':'deep',fields,
+    dir:sel.dir,plan:sel.plan,setup:[...sel.setup],emo:[...sel.emo],mistake:[...sel.mistake]};
+}
+function saveDraftNow(){
+  if(draftPaused)return;
+  if(draftTimer){clearTimeout(draftTimer);draftTimer=null}
+  try{const d=draftData();localStorage.setItem(DRAFT_KEY,JSON.stringify(d));setDraftNote('임시저장됨 '+draftClock(d.savedAt))}catch(e){setDraftNote('임시저장 실패')}
+}
+function scheduleDraftSave(){
+  if(draftPaused)return;
+  setDraftNote('작성 중…');
+  if(draftTimer)clearTimeout(draftTimer);
+  draftTimer=setTimeout(saveDraftNow,500);
+}
+function clearDraft(){
+  if(draftTimer){clearTimeout(draftTimer);draftTimer=null}
+  localStorage.removeItem(DRAFT_KEY);setDraftNote('');
+}
+function selectDraftChips(id,store,values){
+  store.clear();(Array.isArray(values)?values:[]).forEach(v=>store.add(v));
+  document.querySelectorAll('#'+id+' .chip').forEach(c=>c.classList.toggle('on',store.has(c.dataset.v)));
+}
+function restoreDraft(){
+  let d;try{d=JSON.parse(localStorage.getItem(DRAFT_KEY)||'null')}catch(e){clearDraft();return false}
+  if(!d||d.version!==1||!d.fields||typeof d.fields!=='object')return false;
+  draftPaused=true;
+  try{
+    setMode(d.mode==='quick'?'quick':'deep');
+    DRAFT_FIELDS.forEach(id=>{if(Object.prototype.hasOwnProperty.call(d.fields,id))document.getElementById(id).value=String(d.fields[id]??'')});
+    sel.dir=d.dir==='short'?'short':'long';
+    document.querySelectorAll('#f-dir .seg').forEach(x=>x.classList.remove('on-long','on-short'));
+    document.querySelector('#f-dir .seg[data-v='+sel.dir+']').classList.add(sel.dir==='long'?'on-long':'on-short');
+    sel.plan=d.plan==='yes'||d.plan==='no'?d.plan:null;
+    document.querySelectorAll('#f-plan .seg').forEach(x=>x.classList.remove('on-yes','on-no'));
+    if(sel.plan)document.querySelector('#f-plan .seg[data-v='+sel.plan+']').classList.add(sel.plan==='yes'?'on-yes':'on-no');
+    selectDraftChips('f-setup',sel.setup,d.setup);selectDraftChips('f-emo',sel.emo,d.emo);selectDraftChips('f-mistake',sel.mistake,d.mistake);
+    editId=d.editId&&trades.some(t=>t.id===d.editId)?d.editId:null;
+    document.getElementById('edit-note').style.display=editId?'block':'none';
+    refreshCalc();setDraftNote('복구됨 · '+draftClock(d.savedAt));
+  }finally{draftPaused=false}
+  toast(editId?'수정 중이던 기록을 복구했어요':'작성 중이던 내용을 복구했어요');return true;
+}
+document.getElementById('log-card').addEventListener('input',e=>{if(e.target.matches('input,textarea,select')&&e.target.id!=='bulk-text')scheduleDraftSave()});
+document.getElementById('log-card').addEventListener('change',e=>{if(e.target.matches('input,textarea,select')&&e.target.id!=='bulk-text')scheduleDraftSave()});
+['f-dir','f-plan','f-setup','f-emo','f-mistake'].forEach(id=>document.getElementById(id).addEventListener('click',scheduleDraftSave));
+document.querySelector('.mode-toggle').addEventListener('click',scheduleDraftSave);
+window.addEventListener('beforeunload',()=>{if(draftTimer)saveDraftNow()});
 
 /* ---------- bulk multi-entry ---------- */
 const TFMAP={'1m':'1m','5m':'5m','15m':'15m','1h':'1H','4h':'4H','1d':'1D','1w':'1W'};
@@ -822,21 +917,72 @@ function editTrade(id){
   if(t.plan){document.querySelector('#f-plan .seg[data-v='+t.plan+']').classList.add(t.plan==='yes'?'on-yes':'on-no')}
   refreshCalc();
   document.getElementById('edit-note').style.display='block';
+  saveDraftNow();
   document.querySelector('.tab[data-view=log]').click();
   window.scrollTo({top:0,behavior:'smooth'});
 }
-function delTrade(id){
+let lastDeletedTrade=null,deleteUndoTimer=null;
+function hideDeleteUndo(){
+  if(deleteUndoTimer){clearTimeout(deleteUndoTimer);deleteUndoTimer=null}
+  lastDeletedTrade=null;document.getElementById('delete-undo').classList.remove('show');
+}
+function showDeleteUndo(snapshot){
+  if(deleteUndoTimer)clearTimeout(deleteUndoTimer);
+  lastDeletedTrade=snapshot;
+  document.getElementById('delete-undo-text').textContent=snapshot.trade.symbol+' 거래가 삭제됐습니다';
+  document.getElementById('delete-undo').classList.add('show');
+  deleteUndoTimer=setTimeout(hideDeleteUndo,8000);
+}
+async function undoDeleteTrade(){
+  const snapshot=lastDeletedTrade;if(!snapshot)return;
+  if(deleteUndoTimer){clearTimeout(deleteUndoTimer);deleteUndoTimer=null}
+  lastDeletedTrade=null;document.getElementById('delete-undo').classList.remove('show');
+  const now=new Date().toISOString(),restored=Object.assign({},snapshot.trade,{updatedAt:now});
+  delete tradeTombstones[restored.id];
+  trades.splice(Math.min(snapshot.index,trades.length),0,restored);
+  try{
+    if(snapshot.shots.length){
+      const shots=snapshot.shots.map(s=>Object.assign({},s,{updatedAt:now}));
+      try{await saveShots(restored.id,shots);localStorage.removeItem('shot_'+restored.id)}
+      catch(e){localStorage.setItem('shot_'+restored.id,JSON.stringify(shots))}
+      if(shotTombstones[restored.id]){
+        shots.forEach(s=>delete shotTombstones[restored.id][s.id]);
+        if(!Object.keys(shotTombstones[restored.id]).length)delete shotTombstones[restored.id];
+      }
+    }
+    save();saveSyncMeta();renderList();scheduleAutoSync('trade-delete-undo',150);toast('삭제한 거래를 복구했어요');
+  }catch(e){
+    save();saveSyncMeta();renderList();scheduleAutoSync('trade-delete-undo',150);toast('거래는 복구했지만 스크린샷 복구에 실패했어요');
+  }
+}
+document.getElementById('delete-undo-btn').onclick=undoDeleteTrade;
+async function delTrade(id){
   if(!confirm('이 기록을 삭제할까요?'))return;
+  const index=trades.findIndex(x=>x.id===id);if(index<0)return;
+  const trade=JSON.parse(JSON.stringify(trades[index])),shots=await getShots(id);
   tradeTombstones[id]=new Date().toISOString();
-  trades=trades.filter(x=>x.id!==id);delShot(id);save();saveSyncMeta();renderList();scheduleAutoSync('trade-delete');toast('삭제됨');
+  trades.splice(index,1);await delShot(id);save();saveSyncMeta();renderList();scheduleAutoSync('trade-delete');
+  showDeleteUndo({trade,shots,index});
 }
 
 /* ---------- list ---------- */
 /* price change % in trade direction, leverage-stripped (the honest "was I right" number) */
 function priceChg(t){
-  if(t.entry&&t.exit)return t.dir==='long'?(t.exit-t.entry)/t.entry*100:(t.entry-t.exit)/t.entry*100;
-  const lev=(t.lev&&t.lev>0)?t.lev:1;
-  return (t.pnl||0)/lev;
+  const entry=Number(t&&t.entry),exit=Number(t&&t.exit);
+  if(Number.isFinite(entry)&&entry>0&&Number.isFinite(exit)&&exit>0){
+    return t.dir==='long'?(exit-entry)/entry*100:(entry-exit)/entry*100;
+  }
+  const rawLev=Number(t&&t.lev),lev=Number.isFinite(rawLev)&&rawLev>0?rawLev:1;
+  const pnl=Number(t&&t.pnl);
+  return Number.isFinite(pnl)?pnl/lev:0;
+}
+function hasExactPriceChange(t){
+  const entry=Number(t&&t.entry),exit=Number(t&&t.exit);
+  return Number.isFinite(entry)&&entry>0&&Number.isFinite(exit)&&exit>0;
+}
+function realizedValue(t){
+  if(!t||t.realized===null||t.realized===undefined||t.realized==='')return null;
+  const value=Number(t.realized);return Number.isFinite(value)?value:null;
 }
 /* R multiple: recompute only from a valid stop on the correct side of entry. */
 function getR(t){
@@ -849,7 +995,8 @@ function getR(t){
 function buildEmoFilter(){
   const set=new Set();trades.forEach(t=>t.emo.forEach(e=>set.add(e)));
   const sel=document.getElementById('flt-emo');const cur=sel.value;
-  sel.innerHTML='<option value="">감정 전체</option>'+[...set].map(e=>'<option>'+e+'</option>').join('');
+  sel.replaceChildren(new Option('감정 전체',''));
+  [...set].forEach(e=>sel.add(new Option(e,e)));
   sel.value=cur;
 }
 function renderList(){
@@ -992,9 +1139,9 @@ function diagnostics(){
     const mC=maj.reduce((a,t)=>a+chg(t),0),aC=alt.reduce((a,t)=>a+chg(t),0);
     const mW=winRate(maj),aW=winRate(alt);
     if(mC>0&&aC<0){
-      out.push({tone:'bad',text:'<b>메이저는 벌고 알트에서 새고 있어요.</b> BTC·ETH '+maj.length+'건은 누적 '+fmt(mC,1)+'%'+(mW!=null?'(승률 '+mW.toFixed(0)+'%)':'')+', 알트 '+alt.length+'건은 '+fmt(aC,1)+'%'+(aW!=null?'(승률 '+aW.toFixed(0)+'%)':'')+'. 알트 사이즈를 줄이는 것만으로 곡선이 달라질 수 있어요.'});
+      out.push({tone:'bad',text:'<b>메이저는 벌고 알트에서 새고 있어요.</b> BTC·ETH '+maj.length+'건은 변화율 합계 '+fmt(mC,1)+'%'+(mW!=null?'(승률 '+mW.toFixed(0)+'%)':'')+', 알트 '+alt.length+'건은 '+fmt(aC,1)+'%'+(aW!=null?'(승률 '+aW.toFixed(0)+'%)':'')+'. 알트 사이즈를 줄이는 것만으로 곡선이 달라질 수 있어요.'});
     }else if(aC>0&&mC<0){
-      out.push({tone:'info',text:'알트 '+alt.length+'건이 누적 '+fmt(aC,1)+'%로 메이저('+fmt(mC,1)+'%)보다 좋아요. 변동성이 큰 만큼 사이즈 관리만 유지되면 강점일 수 있어요.'});
+      out.push({tone:'info',text:'알트 '+alt.length+'건의 변화율 합계가 '+fmt(aC,1)+'%로 메이저('+fmt(mC,1)+'%)보다 좋아요. 변동성이 큰 만큼 사이즈 관리만 유지되면 강점일 수 있어요.'});
     }
   }
 
@@ -1024,9 +1171,9 @@ function diagnostics(){
   }
 
   // 8. record hygiene
-  const noStop=trades.filter(t=>t.stop==null).length;
-  if(n>=10&&noStop/n>0.5){
-    out.push({tone:'info',text:'전체 '+n+'건 중 '+noStop+'건에 손절가가 없어서 R 통계가 일부만 반영돼요. 손절을 걸고 들어가는 편이라면 그 숫자만 채워도 분석이 훨씬 정확해져요.'});
+  const noValidR=trades.filter(t=>getR(t)==null).length;
+  if(n>=10&&noValidR/n>0.5){
+    out.push({tone:'info',text:'전체 '+n+'건 중 '+noValidR+'건은 유효한 손절가가 없어 R 통계에서 제외돼요. 손절가를 채우면 분석이 훨씬 정확해져요.'});
   }
   return out;
 }
@@ -1058,29 +1205,31 @@ function renderStats(){
   const planRate=(planY.length+planN.length)?planY.length/(planY.length+planN.length)*100:null;
   const avgWin=wins.length?wins.reduce((a,t)=>a+priceChg(t),0)/wins.length:0;
   const avgLoss=losses.length?losses.reduce((a,t)=>a+priceChg(t),0)/losses.length:0;
+  const exactPriceCount=trades.filter(hasExactPriceChange).length;
+  const estimatedCount=trades.length-exactPriceCount;
 
-  let html='<div class="sample-note">이 통계는 <b>기록한 '+trades.length+'건</b> 기준이며, 수익·손실과 방향 적중률은 <b>진입가·청산가의 가격변화율</b>로 판정해요. 실제 계좌 손익은 실현손익(USDT)을 따로 보세요. 일부만 복기했다면 평균은 실제 성과가 아니라 <b>기록한 매매들 사이의 패턴</b>(감정별·셋업별 비교)으로 보는 게 맞아요.</div>'+ 
+  let html='<div class="sample-note">이 통계는 <b>기록한 '+trades.length+'건</b> 기준입니다. 진입가·청산가가 모두 있는 <b>'+exactPriceCount+'건</b>은 실제 가격변화율로 계산하고'+(estimatedCount?' 나머지 <b>'+estimatedCount+'건</b>은 입력 손익률을 레버리지로 나눠 추정해요.':' 있어요.')+' 변화율 합계는 거래별 변화율의 단순 합산이며 실제 계좌 손익은 실현손익(USDT)을 따로 보세요. 일부만 복기했다면 평균은 실제 성과가 아니라 <b>기록한 매매들 사이의 패턴</b>(감정별·셋업별 비교)으로 보는 게 맞아요.</div>'+ 
     '<div class="stat-grid">'+
-    stat('방향 적중률 (가격)',(decided?wr.toFixed(1):'—')+'<small>%</small>',wr>=50?'win':'loss')+
+    stat('방향 적중률 (가격)',decided?wr.toFixed(1)+'<small>%</small>':'—',decided?(wr>=50?'win':'loss'):'')+
     stat('총 거래',trades.length+'<small>건</small>')+
-    stat('누적 변화율',fmt(cum,1)+'<small>%</small>',cum>=0?'win':'loss')+
+    stat('가격 변화율 합계',fmt(cum,1)+'<small>%</small>',cum>=0?'win':'loss')+
     stat('평균 변화율',fmt(avg,2)+'<small>%</small>',avg>=0?'win':'loss')+
     '</div>';
 
   html+=diagnosticsHtml();
   html+=majorAltTable();
 
-  const realTrades=trades.filter(t=>t.realized!=null);
-  const realSum=realTrades.reduce((a,t)=>a+t.realized,0);
+  const realTrades=trades.filter(t=>realizedValue(t)!=null);
+  const realSum=realTrades.reduce((a,t)=>a+realizedValue(t),0);
   html+='<div class="stat-grid">'+
     statHero('규율 점수 (계획 준수율)',planRate==null?'—':planRate.toFixed(0)+'<small>%</small>')+
-    stat('평균 R',avgR==null?'—':fmt(avgR,2)+'<small>R</small>',avgR!=null&&avgR>=0?'win':'loss')+
+    stat('평균 R',avgR==null?'—':fmt(avgR,2)+'<small>R</small>',avgR==null?'':avgR>=0?'win':'loss')+
     (realTrades.length
       ? stat('실현손익 합계',fmt(realSum,1)+'<small> USDT</small>',realSum>=0?'win':'loss')
-      : stat('평균 수익 (가격)',fmt(avgWin,2)+'<small>%</small>','win'))+
+      : stat('평균 수익 (가격)',wins.length?fmt(avgWin,2)+'<small>%</small>':'—',wins.length?'win':''))+
     (realTrades.length
       ? stat('실현 거래',realTrades.length+'<small>건</small>')
-      : stat('평균 손실 (가격)',fmt(avgLoss,2)+'<small>%</small>','loss'))+
+      : stat('평균 손실 (가격)',losses.length?fmt(avgLoss,2)+'<small>%</small>':'—',losses.length?'loss':''))+
     '</div>';
 
   if(rVals.length){
@@ -1092,8 +1241,8 @@ function renderStats(){
     html+='<div class="stat-grid">'+
       statHero('기대값 (건당, R 기준)',fmt(expectancy,2)+'<small>R</small>')+
       stat('R 승률',rWinRate==null?'—':rWinRate.toFixed(0)+'<small>%</small>')+
-      stat('평균 익절 R',fmt(avgWinR,2)+'<small>R</small>','win')+
-      stat('평균 손절 R',fmt(avgLossR,2)+'<small>R</small>','loss')+
+      stat('평균 익절 R',rWins.length?fmt(avgWinR,2)+'<small>R</small>':'—',rWins.length?'win':'')+
+      stat('평균 손절 R',rLosses.length?fmt(avgLossR,2)+'<small>R</small>':'—',rLosses.length?'loss':'')+
       '</div>';
   }
 
@@ -1130,7 +1279,7 @@ function majorAltTable(){
   }
   const maj=trades.filter(t=>isMajor(t.symbol)),alt=trades.filter(t=>!isMajor(t.symbol));
   return '<div class="bd" style="margin-bottom:22px"><div class="eyebrow" style="margin-bottom:14px">메이저 vs 알트 (가격 변화율)</div>'+
-    '<table><thead><tr><th>그룹</th><th class="r">건수</th><th class="r">승률</th><th class="r">누적변화</th><th class="r">평균변화</th></tr></thead><tbody>'+
+    '<table><thead><tr><th>그룹</th><th class="r">건수</th><th class="r">승률</th><th class="r">변화합계</th><th class="r">평균변화</th></tr></thead><tbody>'+
     row('메이저 (BTC·ETH)',maj)+row('알트',alt)+'</tbody></table></div>';
 }
 function symbolTable(){
@@ -1154,14 +1303,14 @@ function groupStats(field){
   })});
   return Object.entries(map).map(([k,arr])=>{
     const w=arr.filter(t=>priceChg(t)>0).length,l=arr.filter(t=>priceChg(t)<0).length;
-    const dec=w+l;const wr=dec?w/dec*100:0;
+    const dec=w+l;const wr=dec?w/dec*100:null;
     const avg=arr.reduce((a,t)=>a+priceChg(t),0)/arr.length;
     return {k,n:arr.length,wr,avg};
   }).sort((a,b)=>b.n-a.n);
 }
 function bdTable(title,field){
   const rows=groupStats(field);
-  let body=rows.map(r=>'<tr><td>'+esc(r.k)+'</td><td class="r">'+r.n+'</td><td class="r wr">'+(r.wr).toFixed(0)+'%</td><td class="r '+(r.avg>=0?'pos':'neg')+'">'+fmt(r.avg,1)+'%</td></tr>').join('');
+  let body=rows.map(r=>'<tr><td>'+esc(r.k)+'</td><td class="r">'+r.n+'</td><td class="r wr">'+(r.wr==null?'—':r.wr.toFixed(0)+'%')+'</td><td class="r '+(r.avg>=0?'pos':'neg')+'">'+fmt(r.avg,1)+'%</td></tr>').join('');
   return '<div class="bd"><div class="eyebrow" style="margin-bottom:14px">'+title+'</div>'+
     '<table><thead><tr><th>구분</th><th class="r">건수</th><th class="r">승률</th><th class="r">평균변화</th></tr></thead><tbody>'+body+'</tbody></table></div>';
 }
@@ -1216,7 +1365,7 @@ function equityChart(mode){
     if(trades.some(t=>isMajor(t.symbol)))lines.push({pts:major,color:C.gold,label:'메이저(BTC·ETH)'});
     if(trades.some(t=>!isMajor(t.symbol)))lines.push({pts:alt,color:C.short,label:'알트'});
   }else{
-    const valFn=isR?getR:(t=>t.realized!=null?t.realized:null);
+    const valFn=isR?getR:realizedValue;
     const hasData=trades.some(t=>valFn(t)!=null);
     if(hasData){
       const pts=series(null,valFn);
@@ -1263,7 +1412,7 @@ function equityChart(mode){
     paths+='<path d="'+d+'" fill="none" stroke="'+L.color+'" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>';
     paths+='<circle cx="'+X(L.pts.length-1).toFixed(1)+'" cy="'+Y(lastY).toFixed(1)+'" r="2.8" fill="'+L.color+'"/>';
   });
-  const title=isR?'누적 R 곡선 (변동성 무관)':isReal?'누적 실현손익 (USDT, 실제 계좌)':'누적 변화율 곡선 (메이저 vs 알트)';
+  const title=isR?'누적 R 곡선 (변동성 무관)':isReal?'누적 실현손익 (USDT, 실제 계좌)':'가격 변화율 합계 곡선 (메이저 vs 알트)';
   let legendOrVal;
   if(!isR&&!isReal){
     legendOrVal=lines.map(L=>'<span style="color:'+L.color+';font-family:var(--mono);margin-left:10px">●'+L.label+' '+fmt(L.pts[L.pts.length-1].y,1)+'%</span>').join('');
@@ -1271,12 +1420,12 @@ function equityChart(mode){
     const lc=lines[0];legendOrVal='<span style="color:'+lc.color+';font-family:var(--mono)">'+fmt(lc.pts[lc.pts.length-1].y,isR?2:1)+unit+'</span>';
   }
   return '<div class="chart-card"><div class="eq-head"><div class="eyebrow">'+title+' '+legendOrVal+'</div>'+toggle+'</div>'+
-    '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">'+
+    '<div class="chart-scroll"><svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">'+
     grid+
     '<line x1="'+padL+'" y1="'+zeroY.toFixed(1)+'" x2="'+(W-padR)+'" y2="'+zeroY.toFixed(1)+'" stroke="'+C.line2+'" stroke-width="1" stroke-dasharray="3 3"/>'+
     paths+
     dateAxis+
-    '</svg></div>';
+    '</svg></div></div>';
 }
 
 /* ---------- chart panel (candles + entry/stop/exit lines, screenshot fallback) ---------- */
@@ -1336,7 +1485,7 @@ async function addShot(id,data){
   try{localStorage.removeItem('shot_'+id)}catch(e){}
   scheduleAutoSync('shot-add');
 }
-function delShot(id){idbDel(id);try{localStorage.removeItem('shot_'+id)}catch(e){}}
+async function delShot(id){await idbDel(id);try{localStorage.removeItem('shot_'+id)}catch(e){}}
 function scaleCanvas(img,maxSide){
   const sc=Math.min(1,maxSide/Math.max(img.width,img.height));
   const cv=document.createElement('canvas');cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);
@@ -1570,7 +1719,7 @@ async function renderShot(id){
   if(!document.getElementById('shot-'+id))return;
   let html='';
   if(shots.length){
-    html+='<div class="shot-grid">'+shots.map(s=>'<div class="shot-item"><img src="'+s.data+'" onclick="lightbox(this.src)"><button class="shot-del" onclick="removeShot(\''+id+'\',\''+s.id+'\')" title="삭제">×</button></div>').join('')+'</div>';
+    html+='<div class="shot-grid">'+shots.map(s=>'<div class="shot-item"><img src="'+s.data+'" alt="거래 차트 스크린샷" onclick="lightbox(this.src)"><button class="shot-del" onclick="removeShot(\''+id+'\',\''+s.id+'\')" title="삭제" aria-label="스크린샷 삭제">×</button></div>').join('')+'</div>';
   }
   html+='<div class="dropzone" id="dz-'+id+'" onclick="pickShot(\''+id+'\')">'+(shots.length?'＋ 스크린샷 더 추가':'스크린샷 추가')+' — 끌어다 놓기 · 클릭 · 캡처 후 Ctrl+V (RSI 포함 차트 패널 추천)</div>';
   box.innerHTML=html;
@@ -1655,20 +1804,30 @@ function validateBackupData(data){
   const raw=Array.isArray(data)?{app:'coinlog',version:1,trades:data}:data;
   if(!raw||typeof raw!=='object')throw new Error('백업 파일 형식이 올바르지 않아요');
   if(raw.app&&raw.app!=='coinlog')throw new Error('COINLOG 백업 파일이 아니에요');
-  if(Number(raw.version||1)>2)throw new Error('현재 앱보다 새로운 백업 형식이에요');
+  const version=Number(raw.version??1);
+  if(!Number.isInteger(version)||version<1||version>2)throw new Error('지원하지 않는 백업 버전이에요');
   if(!Array.isArray(raw.trades))throw new Error('거래 기록 목록이 없어요');
   const ids=new Set();
   for(const t of raw.trades){
     if(!t||typeof t!=='object'||typeof t.id!=='string'||!t.id.trim())throw new Error('ID가 없는 거래 기록이 있어요');
+    if(!isSafeRecordId(t.id))throw new Error('안전하지 않은 거래 ID가 있어요');
+    if(typeof t.symbol!=='string'||!t.symbol.trim())throw new Error('종목이 없는 거래 기록이 있어요');
+    if(t.dir!==undefined&&t.dir!=='long'&&t.dir!=='short')throw new Error('거래 방향이 올바르지 않은 기록이 있어요');
     if(ids.has(t.id))throw new Error('같은 ID의 거래가 백업에 중복되어 있어요');
     ids.add(t.id);
   }
   if(raw.shots!==undefined&&(raw.shots===null||typeof raw.shots!=='object'||Array.isArray(raw.shots)))throw new Error('스크린샷 형식이 올바르지 않아요');
   for(const arr of Object.values(raw.shots||{})){
     if(!Array.isArray(arr))throw new Error('스크린샷 목록이 손상됐어요');
+    const shotIds=new Set();
     for(const shot of arr){
       const value=typeof shot==='string'?shot:shot&&shot.data;
-      if(typeof value!=='string'||!value.startsWith('data:image/'))throw new Error('읽을 수 없는 스크린샷이 있어요');
+      if(shot&&typeof shot==='object'&&shot.id!==undefined&&!isSafeRecordId(shot.id))throw new Error('안전하지 않은 스크린샷 ID가 있어요');
+      if(shot&&typeof shot==='object'&&shot.id!==undefined){
+        if(shotIds.has(shot.id))throw new Error('같은 ID의 스크린샷이 중복되어 있어요');
+        shotIds.add(shot.id);
+      }
+      if(typeof value!=='string'||!/^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(value))throw new Error('읽을 수 없는 스크린샷이 있어요');
     }
   }
   return normalizeState(raw);
@@ -1888,20 +2047,45 @@ function normalizeShotTombs(v){
   for(const [tradeId,items] of Object.entries(v))out[tradeId]=normalizeTombs(items);
   return out;
 }
+function isSafeRecordId(value){return typeof value==='string'&&/^[A-Za-z0-9_-]{1,120}$/.test(value)}
+function cleanNumber(value){
+  if(value===null||value===undefined||value==='')return null;
+  const n=Number(value);return Number.isFinite(n)?n:null;
+}
+function cleanTextList(value){
+  if(!Array.isArray(value))return [];
+  return value.filter(v=>typeof v==='string').map(v=>v.trim()).filter(Boolean);
+}
+function cleanDate(value,fallback='1970-01-01T00:00:00.000Z'){
+  return typeof value==='string'&&timeMs(value)?new Date(value).toISOString():fallback;
+}
 function normalizeState(raw){
   const s=raw&&typeof raw==='object'?raw:{};
   const list=Array.isArray(s.trades)?s.trades:[];
-  const cleanTrades=list.filter(t=>t&&t.id).map(t=>{
-    const stamp=tradeStamp(t);
-    return Object.assign({},t,{createdAt:t.createdAt||stamp,updatedAt:t.updatedAt||stamp});
+  const seenTrades=new Set();
+  const cleanTrades=list.filter(t=>t&&isSafeRecordId(t.id)&&!seenTrades.has(t.id)&&seenTrades.add(t.id)).map(t=>{
+    const date=cleanDate(t.date,cleanDate(t.createdAt)),createdAt=cleanDate(t.createdAt,date),updatedAt=cleanDate(t.updatedAt,createdAt);
+    return Object.assign({},t,{
+      symbol:typeof t.symbol==='string'?t.symbol.trim().toUpperCase():'',
+      dir:t.dir==='short'?'short':'long',
+      entry:cleanNumber(t.entry),exit:cleanNumber(t.exit),stop:cleanNumber(t.stop),lev:cleanNumber(t.lev),
+      pnl:cleanNumber(t.pnl)??0,realized:cleanNumber(t.realized),r:cleanNumber(t.r),
+      tf:typeof t.tf==='string'?t.tf:'',date,exitDate:t.exitDate?cleanDate(t.exitDate,null):null,
+      setup:cleanTextList(t.setup),emo:cleanTextList(t.emo),mistake:cleanTextList(t.mistake),
+      plan:t.plan==='yes'||t.plan==='no'?t.plan:null,
+      thesis:typeof t.thesis==='string'?t.thesis:'',lesson:typeof t.lesson==='string'?t.lesson:'',
+      createdAt,updatedAt
+    });
   });
   const byTrade={};
   const rawShots=s.shots&&typeof s.shots==='object'?s.shots:{};
   for(const t of cleanTrades){
     const a=Array.isArray(rawShots[t.id])?rawShots[t.id]:[];
+    const seenShots=new Set();
     const clean=a.map((shot,i)=>typeof shot==='string'?{id:'legacy-'+i,data:shot,updatedAt:tradeStamp(t)}:shot)
       .filter(shot=>shot&&shot.data)
-      .map((shot,i)=>({id:shot.id||('legacy-'+i),data:shot.data,updatedAt:shot.updatedAt||tradeStamp(t)}));
+      .map((shot,i)=>({id:shot.id||('legacy-'+i),data:shot.data,updatedAt:cleanDate(shot.updatedAt,tradeStamp(t))}))
+      .filter(shot=>isSafeRecordId(shot.id)&&!seenShots.has(shot.id)&&seenShots.add(shot.id));
     if(clean.length)byTrade[t.id]=clean;
   }
   return {app:'coinlog',version:2,trades:cleanTrades,shots:byTrade,
@@ -2113,6 +2297,7 @@ updateSyncUI();
 updateSyncSize();
 updateImportUndoUI();
 resetForm();
+restoreDraft();
 scheduleAutoSync('app-open',500);
 </script>
 </body>
