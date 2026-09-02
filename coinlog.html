@@ -707,6 +707,7 @@ document.getElementById('btn-save').onclick=()=>{
     createdAt:previous&&previous.createdAt?previous.createdAt:now,
     updatedAt:now,
   };
+  if(!hasTradeContent(t)){toast('가격·실현손익·메모 등 거래 내용을 하나 이상 입력하세요');return}
   if(editing){trades=trades.map(x=>x.id===editId?t:x);delete tradeTombstones[editId];toast('수정 완료')}
   else{trades.unshift(t);toast(quickMode?'추가됨 · 다음 건 입력':'기록 저장됨 — 잘했다')}
   save();saveSyncMeta();clearDraft();scheduleAutoSync('trade-save');
@@ -988,6 +989,13 @@ function buildEmoFilter(){
 }
 function renderList(){
   buildEmoFilter();
+  const box=document.getElementById('trade-list');
+  const openCharts=new Map();
+  box.querySelectorAll('.trade-chart.show').forEach(panel=>{
+    const id=panel.id.startsWith('c-')?panel.id.slice(2):'';
+    if(id)openCharts.set(id,panel);
+  });
+  const openNotes=new Set([...box.querySelectorAll('.trade-notes.show')].map(note=>note.id.slice(2)));
   const q=document.getElementById('flt-search').value.toLowerCase();
   const fd=document.getElementById('flt-dir').value;
   const fr=document.getElementById('flt-result').value;
@@ -1003,7 +1011,6 @@ function renderList(){
   });
   document.getElementById('count-tag').textContent=rows.length+' / '+trades.length+' 건';
   rows.sort((a,b)=>new Date(b.date)-new Date(a.date));
-  const box=document.getElementById('trade-list');
   if(!rows.length){
     box.innerHTML='<div class="empty"><div class="big">'+(trades.length?'조건에 맞는 기록이 없어요':'아직 기록이 없습니다')+'</div><div class="sm">'+(trades.length?'필터를 바꿔보세요.':'\'기록\' 탭에서 첫 복기를 남겨보세요.')+'</div></div>';
     return;
@@ -1035,7 +1042,7 @@ function renderList(){
       '<span class="dir '+t.dir+'">'+(t.dir==='long'?'롱':'숏')+'</span>'+
       '<span class="pnl '+cls+'">'+fmt(g)+'%</span>'+
       (rv!=null?'<span class="r-badge">'+fmt(rv)+'R</span>':'')+
-      '<span class="lev-pnl">레버 '+fmt(t.pnl)+'%</span></div>'+
+      (Number(t.lev)>1?'<span class="lev-pnl">레버 '+fmt(t.pnl)+'%</span>':'')+'</div>'+
       '<div class="trade-meta">'+meta.map(m=>'<span>'+esc(String(m))+'</span>').join('')+'</div>'+
       (tags.length?'<div class="trade-tags">'+tags.join('')+'</div>':'')+
       '<div class="trade-foot">'+
@@ -1048,6 +1055,14 @@ function renderList(){
       '<div class="trade-chart" id="c-'+t.id+'"></div>'+
       '</div>';
   }).join('');
+  for(const [id,panel] of openCharts){
+    const placeholder=document.getElementById('c-'+id);if(!placeholder)continue;
+    placeholder.replaceWith(panel);
+    const t=trades.find(x=>x.id===id),stamp=(t&&(t.updatedAt||t.date))||'';
+    if(panel.dataset.tradeStamp!==stamp){buildChartPanel(id,panel);panel.dataset.loaded='1'}
+    else renderShot(id);
+  }
+  for(const id of openNotes){const note=document.getElementById('n-'+id);if(note)note.classList.add('show')}
 }
 ['flt-search','flt-dir','flt-result','flt-emo'].forEach(id=>document.getElementById(id).addEventListener('input',renderList));
 
@@ -1371,6 +1386,7 @@ function toggleChart(id){
 function buildChartPanel(id,el){
   activeShotId=id;
   const t=trades.find(x=>x.id===id);
+  el.dataset.tradeStamp=(t&&(t.updatedAt||t.date))||'';
   const src=localStorage.getItem('coinChartSrc')||'okx';
   const hasProxy=!!localStorage.getItem('coinProxy');
   if(!chartTf[id])chartTf[id]=(t&&['5m','15m','1H','4H'].includes(t.tf))?t.tf:'1H';
@@ -1577,9 +1593,8 @@ function bindPaste(){
   });
 }
 async function renderShot(id){
-  const box=document.getElementById('shot-'+id);if(!box)return;
   const shots=await getShots(id);
-  if(!document.getElementById('shot-'+id))return;
+  const box=document.getElementById('shot-'+id);if(!box)return;
   let html='';
   if(shots.length){
     html+='<div class="shot-grid">'+shots.map(s=>'<div class="shot-item"><img src="'+s.data+'" alt="거래 차트 스크린샷" onclick="lightbox(this.src)"><button class="shot-del" onclick="removeShot(\''+id+'\',\''+s.id+'\')" title="삭제" aria-label="스크린샷 삭제">×</button></div>').join('')+'</div>';
@@ -1922,6 +1937,14 @@ function cleanTextList(value){
 function cleanDate(value,fallback='1970-01-01T00:00:00.000Z'){
   return typeof value==='string'&&timeMs(value)?new Date(value).toISOString():fallback;
 }
+function hasTradeContent(t){
+  if(!t||typeof t!=='object')return false;
+  const hasNumber=['entry','exit','stop','lev','realized','r'].some(k=>cleanNumber(t[k])!==null);
+  const pnl=cleanNumber(t.pnl);
+  const hasText=['tf','thesis','lesson'].some(k=>typeof t[k]==='string'&&t[k].trim());
+  const hasTag=['setup','emo','mistake'].some(k=>Array.isArray(t[k])&&t[k].length);
+  return hasNumber||(pnl!==null&&pnl!==0)||hasText||hasTag||t.plan==='yes'||t.plan==='no'||Boolean(t.exitDate);
+}
 function normalizeState(raw){
   const s=raw&&typeof raw==='object'?raw:{};
   const list=Array.isArray(s.trades)?s.trades:[];
@@ -1939,7 +1962,7 @@ function normalizeState(raw){
       thesis:typeof t.thesis==='string'?t.thesis:'',lesson:typeof t.lesson==='string'?t.lesson:'',
       createdAt,updatedAt
     });
-  });
+  }).filter(hasTradeContent);
   const byTrade={};
   const rawShots=s.shots&&typeof s.shots==='object'?s.shots:{};
   for(const t of cleanTrades){
